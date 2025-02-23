@@ -11,21 +11,18 @@ classdef PowerSystem
     methods
         function obj = PowerSystem(numCustomers, inverters, activeImpedances, reactiveImpedances)
             % PowerSystem Construct an instance of this class
-            %   Detailed explanation goes here
             obj.A = diag(-1.*inverters);
             obj.B = diag(inverters);
+
+            activeImpMainLine   =   activeImpedances(:,1);
+            activeImpBranches   =   activeImpedances(:,2);
             
             % Generate C matrix template
-            Ctemplate = zeros(numCustomers,numCustomers);
+            obj.C = zeros(numCustomers,numCustomers);
             for i = 1:1:numCustomers
-                Ctemplate(i:end,i:end) = Ctemplate(i:end,i:end) + repmat(X(i),numCustomers-1,numCustomers-1);
+                obj.C(i:end,i:end) = obj.C(i:end,i:end) + repmat(activeImpMainLine(i),numCustomers+1-i,numCustomers+1-i);
             end
-
-            % Generate C matrix by slicing the templates
-            C = zeros(numCustomers,numCustomers,numCustomers);
-            for i = 1:1:numCustomers
-                C(1:i,1:i,i) = Ctemplate(1:i,1:i);
-            end
+            obj.C = obj.C - diag(2.*activeImpBranches);
         end
 
         function stableBool = isStable(obj)
