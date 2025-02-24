@@ -17,8 +17,8 @@ classdef Attack
             end
 
             % pick random outputs to attack if none have been specified
-            if size(attackedOutputs) == [0,0]
-                attackedOutputs = sort(randperm(numCustomers,numAttacks));
+            if isempty(attackedOutputs)
+                attackedOutputs = sort(randperm(numOutputs,numAttacks));
             end
             fprintf("The attacked outputs are: \n");
             disp(attackedOutputs);
@@ -27,8 +27,8 @@ classdef Attack
             % attacked
             attackList = zeros(numOutputs,1);
             for i = 1:1:obj.numAttacks
-                outputA = attackedOutputsA(i);
-                attackList(outputA) = true;
+                output = attackedOutputs(i);
+                attackList(output) = true;
             end
             obj.attackList = attackList;
         end
