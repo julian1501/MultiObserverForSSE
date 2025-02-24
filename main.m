@@ -14,4 +14,10 @@ reactiveImpedances = [0.00147, 0.02157;
                       0.00147, 0.02157;
                       0.00147, 0.02157];
 
+fprintf(repmat('-',1,100));
+fprintf('\nSimulating a system with %d customers\n',numCustomers);
+
 sys = PowerSystem(numCustomers,inverters,activeImpedances,reactiveImpedances);
+
+numOutputs = numCustomers; % each customer senses their voltage
+
