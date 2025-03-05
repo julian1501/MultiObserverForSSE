@@ -6,6 +6,12 @@ classdef PowerSystem
         A % State matrix
         B % Input matrix
         C % Output matrix
+        nx
+        ny
+        nu
+        Vref % reference voltage
+        activeImpedances
+        reactiveImpedanes
     end
 
     methods
@@ -13,16 +19,42 @@ classdef PowerSystem
             % PowerSystem Construct an instance of this class
             obj.A = diag(-1.*inverters);
             obj.B = diag(inverters);
+            obj.activeImpedances = activeImpedances;
+            obj.reactiveImpedanes = reactiveImpedances;
+            obj.Vref = 230;
 
-            activeImpMainLine   =   activeImpedances(:,1);
-            activeImpBranches   =   activeImpedances(:,2);
+            reactiveImpMainLine   =   reactiveImpedances(:,1);
+            reactiveImpBranches   =   reactiveImpedances(:,2);
             
             % Generate C matrix template
             obj.C = zeros(numCustomers,numCustomers);
             for i = 1:1:numCustomers
-                obj.C(i:end,i:end) = obj.C(i:end,i:end) + repmat(activeImpMainLine(i),numCustomers+1-i,numCustomers+1-i);
+                obj.C(i:end,i:end) = obj.C(i:end,i:end) + repmat(reactiveImpMainLine(i),numCustomers+1-i,numCustomers+1-i);
             end
-            obj.C = obj.C - diag(2.*activeImpBranches);
+            obj.C = obj.C + diag(reactiveImpBranches);
+            obj.C = -2.*obj.C;
+
+            obj.nx = size(obj.A,1);
+            obj.ny = size(obj.C,1);
+            obj.nu = size(obj.B,2);
+
+            if obj.isStable == 0
+                fprintf("The system is not stable. \n")
+            else
+                fprintf("The system is stable. \n")
+            end
+            
+            if obj.isObsv == 0
+                error("The system (A,C) is not observable. \n")
+            else
+                fprintf("The system (A,C) is observable. \n")
+            end
+
+            if obj.isCtrb == 0
+                error("The system (A,B) is not controlable. \n")
+            else
+                fprintf("The system (A,C) is controlable. \n")
+            end
         end
 
         function stableBool = isStable(obj)
@@ -33,6 +65,36 @@ classdef PowerSystem
                 stableBool = false;
             else
                 stableBool = true;
+            end
+        end
+
+        function obsvBool = isObsv(obj)
+            % isObsv
+            % Check if system is observable through PBH test
+            ev = eig(obj.A);
+            I = eye(obj.nx);
+            % PBH test
+            obsvBool = true;
+            for i = 1:1:obj.nx
+                if rank([ev(i)*I - obj.A; obj.C]) ~= obj.nx
+                    obsvBool = false;
+                    break
+                end
+            end
+        end
+
+        function ctrbBool = isCtrb(obj)
+            % isObsv
+            % Check if system is observable through PBH test
+            ev = eig(obj.A);
+            I = eye(obj.nx);
+            % PBH test
+            ctrbBool = true;
+            for i = 1:1:obj.nx
+                if rank([ev(i)*I - obj.A, obj.B]) ~= obj.nx
+                    ctrbBool = false;
+                    break
+                end
             end
         end
     end
