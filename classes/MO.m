@@ -26,8 +26,7 @@ classdef MO
             obj.A = obj.sys.A;
 
             if 2*obj.attack.numAttacks > obj.numOutputs
-                warning(["More than half of the sensors are attacked",...
-                        "2*numAttacks (%d) > numOutputs (%d)"],...
+                warning("More than half of the sensors are attacked 2*numAttacks (%d) > numOutputs (%d)",...
                         obj.attack.numAttacks,obj.numOutputs);
             end
             

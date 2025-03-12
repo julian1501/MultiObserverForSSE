@@ -19,7 +19,7 @@ classdef PowerDistMO
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,numAttacks,attackedOutputs,v0,inputFileName)
+        function obj = PowerDistMO(numCustomers,numAttacks,attackedOutputs,v0,attackFunc,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -78,7 +78,7 @@ classdef PowerDistMO
             end
             
             obj.sys = PowerSystem(numCustomers,sysConsts);
-            obj.attack = Attack(obj.numCustomers,numAttacks,attackedOutputs);
+            obj.attack = Attack(obj.numCustomers,numAttacks,attackedOutputs,attackFunc);
 
             numPrimaryObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
             obj.primaryMO = MO(obj.sys,obj.attack,numPrimaryObsvOutputs);
@@ -111,7 +111,7 @@ classdef PowerDistMO
             numOfSubObservers = size(subsetIndices,2);
         end
 
-        function [t,v,err] = solve(obj,tspan,x0sys)
+        function [t,v,err,bestObsv] = solve(obj,tspan,x0sys)
             %METHOD1 Summary of this method goes here
             %   Detailed explanation goes here
             
@@ -132,7 +132,7 @@ classdef PowerDistMO
             % select best estimate
             delete(wb);
             wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
-            xBestEst = obj.selectBestEstimates(obj.t,obj.x,wb);
+            [bestObsv,xBestEst] = obj.selectBestEstimates(obj.t,obj.x,wb);
             delete(wb);
             % calculate voltages
             v = zeros(obj.numCustomers,size(obj.t,2),2);
@@ -188,7 +188,7 @@ classdef PowerDistMO
 
             % calculate system evolution
             mSys = obj.sys.C*xSys + u; % + disturbance
-            ySys = mSys ; % + attack + noise;
+            ySys = mSys + obj.attack.value(t); % + noise;
             dxSys = obj.sys.A*xSys + obj.sys.B*obj.Q(mSys,[-14899.4 0 0 14899.4],obj.sys.charInverters);
             
             % calculate primary observers evolution
@@ -198,7 +198,6 @@ classdef PowerDistMO
                 mhat = obj.sys.C*xhat + u + obj.primaryMO.KSet(:,:,o)*(obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:)));
                 dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters);
             end
-
 
             % calculate secondary observers evolution
             dxSec = zeros(size(xSec));
@@ -264,7 +263,7 @@ classdef PowerDistMO
             end
         end
 
-        function bestStateEstimate = selectBestEstimates(obj,t,x,wb)
+        function [bestEstObsv,bestStateEstimate] = selectBestEstimates(obj,t,x,wb)
             xPrim = x(:,:,2:obj.primaryMO.numObservers+1);
             xSec  = x(:,:,obj.primaryMO.numObservers+2:end);
             % PiJ stores all the maximum difference between a primary and
@@ -273,6 +272,7 @@ classdef PowerDistMO
             
             tsteps = size(t,2);
             bestStateEstimate = zeros(obj.sys.nx,tsteps);
+            bestEstObsv = zeros(1,tsteps);
 
             for t=1:tsteps
                 % update waitbar
@@ -299,6 +299,7 @@ classdef PowerDistMO
                 end
                 bestObsv = find(PiJ==min(PiJ));
                 bestObsv = bestObsv(1);
+                bestEstObsv(t) = bestObsv;
                 bestStateEstimate(:,t) = xPrim(:,t,bestObsv);
             end
         end
