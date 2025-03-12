@@ -10,13 +10,16 @@ classdef PowerDistMO
         secondaryMO % Small multi observer
         numObservers % Total number of observers
         powerGenCon % power consumption/generation data
-        sysConsts
+        numSubObservers % number of sub observers per primary observer
+        subsetIndices % which subobservers are a subobserver of a primary observer
+        v0 % substation voltage function
+
         t % solution time
         x % solution states
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,numAttacks,attackedOutputs,inputFileName)
+        function obj = PowerDistMO(numCustomers,numAttacks,attackedOutputs,v0,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -24,6 +27,7 @@ classdef PowerDistMO
             fprintf('\nCreating a system with %d customers\n',numCustomers);
             
             obj.numCustomers = numCustomers;
+            obj.v0 = v0;
 
             if ~isempty(inputFileName)
                 ... % read file extract data
@@ -76,13 +80,13 @@ classdef PowerDistMO
             obj.sys = PowerSystem(numCustomers,sysConsts);
             obj.attack = Attack(obj.numCustomers,numAttacks,attackedOutputs);
 
-            numPrimaryObsvOutputs = obj.attack.numAttacks;
+            numPrimaryObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
             obj.primaryMO = MO(obj.sys,obj.attack,numPrimaryObsvOutputs);
             numSecondaryObsvOutputs = 1;
             obj.secondaryMO = MO(obj.sys,obj.attack,numSecondaryObsvOutputs);
             obj.numObservers = obj.primaryMO.numObservers + obj.secondaryMO.numObservers;
 
-            [numOfSubObservers,subsetIndices] = obj.findIndices();
+            [obj.numSubObservers,obj.subsetIndices] = obj.findIndices();
 
         end
 
@@ -107,7 +111,7 @@ classdef PowerDistMO
             numOfSubObservers = size(subsetIndices,2);
         end
 
-        function [t,v,x] = solve(obj,tspan,x0sys)
+        function [t,v,err] = solve(obj,tspan,x0sys)
             %METHOD1 Summary of this method goes here
             %   Detailed explanation goes here
             
@@ -117,19 +121,31 @@ classdef PowerDistMO
             x0 = x0(:);
 
             wb = waitbar(0,'Solver is currently at time: 0','Name','Solving the ODE');
-            [t,x] = ode45(@(t,x) obj.odefun(wb,t,x,tspan(2)),tspan,x0);
-            x = x'; t = t';
-            xSys = x(1:obj.numCustomers,:);
-            % extract v_is
-            v = zeros(obj.numCustomers,size(t,2));
-            for ts = 1:1:size(t,2)
+            [obj.t,obj.x] = ode45(@(t,x) obj.odefun(wb,t,x,tspan(2)),tspan,x0);
+            % some reshape black magic to get it in the correct form (all
+            % observers behind each other)
+            obj.x = reshape(obj.x,[],obj.sys.nx,obj.numObservers+1); 
+            obj.x = permute(obj.x,[2 1 3]);
+            obj.t = obj.t';
+            t = obj.t;
+            xSys  = obj.x(:,:,1);
+            % select best estimate
+            delete(wb);
+            wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
+            xBestEst = obj.selectBestEstimates(obj.t,obj.x,wb);
+            delete(wb);
+            % calculate voltages
+            v = zeros(obj.numCustomers,size(obj.t,2),2);
+            for ts = 1:1:size(obj.t,2)
+                v0sqrd = obj.v0(obj.t(ts))^2;
                 for i = 1:obj.numCustomers
                     % Stuff for v_i
                     obari = obj.obar(i);
-                    v(i,ts) = sqrt(obj.sys.C(i,:)*xSys(:,ts) + obj.v0(t(ts))^2 - obari);
+                    v(i,ts,1) = sqrt(obj.sys.C(i,:)*xSys(:,ts,1) + v0sqrd - obari);
+                    v(i,ts,2) = sqrt(obj.sys.C(i,:)*xBestEst(:,ts,1) + v0sqrd - obari);
                 end
             end
-            delete(wb);
+            err = v(:,:,1) - v(:,:,2);
         end
         
         function dx = odefun(obj,wb,t,x,tmax)
@@ -172,7 +188,7 @@ classdef PowerDistMO
 
             % calculate system evolution
             mSys = obj.sys.C*xSys + u; % + disturbance
-            ySys = mSys; % + attack + noise;
+            ySys = mSys ; % + attack + noise;
             dxSys = obj.sys.A*xSys + obj.sys.B*obj.Q(mSys,[-14899.4 0 0 14899.4],obj.sys.charInverters);
             
             % calculate primary observers evolution
@@ -187,9 +203,9 @@ classdef PowerDistMO
             % calculate secondary observers evolution
             dxSec = zeros(size(xSec));
             for o = 1:obj.secondaryMO.numObservers
-                xhat = xPrim(:,:,o);
-                mhat = obj.sys.C*xhat + u + obj.primaryMO.KSet(:,:,o)*(obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:)));
-                dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters);
+                xhat = xSec(:,:,o);
+                mhat = obj.sys.C*xhat + u + obj.secondaryMO.KSet(:,:,o)*(obj.secondaryMO.CSet(:,:,o)*xhat - ySys(obj.secondaryMO.CSetIndices(o,:)));
+                dxSec(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters);
             end
             
             dx = cat(3,dxSys,dxPrim,dxSec);
@@ -220,9 +236,9 @@ classdef PowerDistMO
             end
         end
 
-        function v0t = v0(~,t)
-            v0t = 230 + 5*sin(t);
-        end
+%         function v0t = v0(~,t)
+%             v0t = 230 + 5*sin(t);
+%         end
 
         function obari = obar(obj,i)
             % Implement obar function as in the paper
@@ -245,6 +261,45 @@ classdef PowerDistMO
             elseif i > 0
                 betai = obj.sys.actImp(i,2)*(obj.powerGenCon.actGen(i) - obj.powerGenCon.actCon(i)) + ...
                         obj.sys.reaImp(i,2)*obj.powerGenCon.reaCon(i);
+            end
+        end
+
+        function bestStateEstimate = selectBestEstimates(obj,t,x,wb)
+            xPrim = x(:,:,2:obj.primaryMO.numObservers+1);
+            xSec  = x(:,:,obj.primaryMO.numObservers+2:end);
+            % PiJ stores all the maximum difference between a primary and
+            % all its secondary observers
+            PiJ = zeros(obj.primaryMO.numObservers,1);
+            
+            tsteps = size(t,2);
+            bestStateEstimate = zeros(obj.sys.nx,tsteps);
+
+            for t=1:tsteps
+                % update waitbar
+                try
+                    waitbar(t/tsteps,wb,sprintf('Selector is currently at timestep: %d/%d',t,tsteps))
+                catch ME
+                    switch ME.identifier
+                        case 'MATLAB:waitbar:InvalidSecondInput'
+                            error('User terminated the solver.')
+                        otherwise
+                            rethrow(ME)
+                    end
+                end
+
+                for primObsv = 1:obj.primaryMO.numObservers
+                    xPrim_ti = xPrim(:,t,primObsv);
+                    difflist = zeros(obj.numSubObservers,1);
+                    for subObsv = 1:obj.numSubObservers
+                        subObsvID = obj.subsetIndices(primObsv,subObsv);
+                        xSub_ti = xSec(:,t,subObsvID);
+                        difflist(subObsv) = norm(xPrim_ti-xSub_ti);
+                    end
+                    PiJ(primObsv) = max(difflist);
+                end
+                bestObsv = find(PiJ==min(PiJ));
+                bestObsv = bestObsv(1);
+                bestStateEstimate(:,t) = xPrim(:,t,bestObsv);
             end
         end
     end
