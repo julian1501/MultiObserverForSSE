@@ -90,13 +90,13 @@ classdef PowerDistMO
             % Find which secondary observers are a sub observer of all
             % primary observers.
             for j = 1:1:obj.primaryMO.numObservers
-                CjIndices = obj.primaryMO.CiIndices(j,:);
+                CPrimIndices = obj.primaryMO.CSetIndices(j,:);
                 % create new emtpy row to fill and append to the bottom of
                 % PsubsetOfJIndices
                 newRow = [];
                 for p = 1:1:obj.secondaryMO.numObservers
-                    CpIndices = Pmo.CiIndices(p,:);
-                    isPSubset = isSubsetOf(CjIndices,CpIndices);
+                    CSecIndices = obj.secondaryMO.CSetIndices(p,:);
+                    isPSubset = all(ismember(CSecIndices,CPrimIndices));
                     % If the indices of p are a subset of those of j: find the
                     if isPSubset
                         newRow(1,end+1) = p;
@@ -104,7 +104,7 @@ classdef PowerDistMO
                 end
                 subsetIndices(j,:) = newRow;
             end
-            numOfSubObservers = size(PsubsetOfJIndices,2);
+            numOfSubObservers = size(subsetIndices,2);
         end
 
         function [t,v,x] = solve(obj,tspan,x0sys)
@@ -114,7 +114,6 @@ classdef PowerDistMO
             % construct x as [v; x; x_hat_primary; x_hat_secondary]
             x0 = zeros(obj.sys.nx,1,1+obj.numObservers);
             x0(:,:,1) = x0sys;
-            x0 = x0(:,:,1);
             x0 = x0(:);
 
             wb = waitbar(0,'Solver is currently at time: 0','Name','Solving the ODE');
@@ -149,11 +148,10 @@ classdef PowerDistMO
             % Extract different x sets
             x = reshape(x,obj.sys.nx,1,[]);
             xSys  = x(:,:,1);
-
-%             xPrim = x(:,:,2:obj.secondaryMO.numObservers+1);
-%             xSec  = x(:,:,obj.secondaryMO.numObservers+2:end);
+            xPrim = x(:,:,2:obj.primaryMO.numObservers+1);
+            xSec  = x(:,:,obj.primaryMO.numObservers+2:end);
             
-            % calculate system evolution
+            % calculate u
             u = zeros(obj.numCustomers,1);
             for i = 1:obj.numCustomers
                 oi = 0;
@@ -171,9 +169,31 @@ classdef PowerDistMO
                 end
                 u(i) = obj.sys.Vref^2 - obj.v0(t)^2 + oi;
             end
-            mSys = obj.sys.C*xSys + u; % + d
+
+            % calculate system evolution
+            mSys = obj.sys.C*xSys + u; % + disturbance
+            ySys = mSys; % + attack + noise;
             dxSys = obj.sys.A*xSys + obj.sys.B*obj.Q(mSys,[-14899.4 0 0 14899.4],obj.sys.charInverters);
-            dx = dxSys;
+            
+            % calculate primary observers evolution
+            dxPrim = zeros(size(xPrim));
+            for o = 1:obj.primaryMO.numObservers
+                xhat = xPrim(:,:,o);
+                mhat = obj.sys.C*xhat + u + obj.primaryMO.KSet(:,:,o)*(obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:)));
+                dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters);
+            end
+
+
+            % calculate secondary observers evolution
+            dxSec = zeros(size(xSec));
+            for o = 1:obj.secondaryMO.numObservers
+                xhat = xPrim(:,:,o);
+                mhat = obj.sys.C*xhat + u + obj.primaryMO.KSet(:,:,o)*(obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:)));
+                dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters);
+            end
+            
+            dx = cat(3,dxSys,dxPrim,dxSec);
+            dx = dx(:);
         end
 
         function Q_m = Q(obj,m,wLims,refCon)
