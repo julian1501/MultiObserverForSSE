@@ -82,10 +82,29 @@ classdef PowerDistMO
             obj.secondaryMO = MO(obj.sys,obj.attack,numSecondaryObsvOutputs);
             obj.numObservers = obj.primaryMO.numObservers + obj.secondaryMO.numObservers;
 
+            [numOfSubObservers,subsetIndices] = obj.findIndices();
+
         end
 
         function [numOfSubObservers,subsetIndices] = findIndices(obj)
-
+            % Find which secondary observers are a sub observer of all
+            % primary observers.
+            for j = 1:1:obj.primaryMO.numObservers
+                CjIndices = obj.primaryMO.CiIndices(j,:);
+                % create new emtpy row to fill and append to the bottom of
+                % PsubsetOfJIndices
+                newRow = [];
+                for p = 1:1:obj.secondaryMO.numObservers
+                    CpIndices = Pmo.CiIndices(p,:);
+                    isPSubset = isSubsetOf(CjIndices,CpIndices);
+                    % If the indices of p are a subset of those of j: find the
+                    if isPSubset
+                        newRow(1,end+1) = p;
+                    end
+                end
+                subsetIndices(j,:) = newRow;
+            end
+            numOfSubObservers = size(PsubsetOfJIndices,2);
         end
 
         function [t,v,x] = solve(obj,tspan,x0sys)
