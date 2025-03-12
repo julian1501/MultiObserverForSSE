@@ -10,28 +10,29 @@ classdef PowerSystem
         ny
         nu
         Vref % reference voltage
-        activeImpedances
-        reactiveImpedanes
+        actImp
+        reaImp
+        
     end
 
     methods
-        function obj = PowerSystem(numCustomers, inverters, activeImpedances, reactiveImpedances)
+        function obj = PowerSystem(numCustomers,sysConsts)
             % PowerSystem Construct an instance of this class
-            obj.A = diag(-1.*inverters);
-            obj.B = diag(inverters);
-            obj.activeImpedances = activeImpedances;
-            obj.reactiveImpedanes = reactiveImpedances;
+            obj.A = diag(-1.*sysConsts.inverters);
+            obj.B = diag(sysConsts.inverters);
+            obj.actImp = sysConsts.actImp;
+            obj.reaImp = sysConsts.reaImp;
             obj.Vref = 230;
 
-            reactiveImpMainLine   =   reactiveImpedances(:,1);
-            reactiveImpBranches   =   reactiveImpedances(:,2);
+            reaImpMainLine   =   obj.reaImp(:,1);
+            reaImpBranches   =   obj.reaImp(:,2);
             
             % Generate C matrix template
             obj.C = zeros(numCustomers,numCustomers);
             for i = 1:1:numCustomers
-                obj.C(i:end,i:end) = obj.C(i:end,i:end) + repmat(reactiveImpMainLine(i),numCustomers+1-i,numCustomers+1-i);
+                obj.C(i:end,i:end) = obj.C(i:end,i:end) + repmat(reaImpMainLine(i),numCustomers+1-i,numCustomers+1-i);
             end
-            obj.C = obj.C + diag(reactiveImpBranches);
+            obj.C = obj.C + diag(reaImpBranches);
             obj.C = -2.*obj.C;
 
             obj.nx = size(obj.A,1);
