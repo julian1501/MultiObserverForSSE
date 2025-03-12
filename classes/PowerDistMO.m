@@ -10,7 +10,7 @@ classdef PowerDistMO
         secondaryMO % Small multi observer
         numObservers % Total number of observers
         powerGenCon % power consumption/generation data
-
+        sysConsts
         t % solution time
         x % solution states
     end
@@ -43,11 +43,30 @@ classdef PowerDistMO
                                       0.00147, 0.02157;
                                       0.00147, 0.02157;
                                       0.00147, 0.02157];
-                obj.numCustomers = 5;
                 
                 obj.powerGenCon.actGen = [3500 5500 4000 4500 3000];
                 obj.powerGenCon.actCon = [2295 5440 5440 2295 2720];
                 obj.powerGenCon.reaCon = [ 300  960  480  600  400];
+                
+                sysConsts.charInverters = [2321.6 3464.1 2467.8 2800.0 1900.0];
+
+                if obj.numCustomers ~= 5
+                    reps = ceil(obj.numCustomers/5);
+                    sysConsts.inverters = repmat(sysConsts.inverters,reps,1);
+                    sysConsts.inverters = sysConsts.inverters(1:obj.numCustomers);
+                    sysConsts.actImp    = repmat(sysConsts.actImp,reps,1);
+                    sysConsts.actImp    = sysConsts.actImp(1:obj.numCustomers,:);
+                    sysConsts.reaImp    = repmat(sysConsts.reaImp,reps,1);
+                    sysConsts.reaImp    = sysConsts.reaImp(1:obj.numCustomers,:);
+                    obj.powerGenCon.actGen = repmat(obj.powerGenCon.actGen,1,reps);
+                    obj.powerGenCon.actGen = obj.powerGenCon.actGen(:,1:obj.numCustomers);
+                    obj.powerGenCon.actCon = repmat(obj.powerGenCon.actCon,1,reps);
+                    obj.powerGenCon.actCon = obj.powerGenCon.actCon(:,1:obj.numCustomers);
+                    obj.powerGenCon.reaCon = repmat(obj.powerGenCon.reaCon,1,reps);
+                    obj.powerGenCon.reaCon = obj.powerGenCon.reaCon(:,1:obj.numCustomers);
+                    sysConsts.charInverters = repmat(sysConsts.charInverters,1,reps);
+                    sysConsts.charInverters = sysConsts.charInverters(:,1:obj.numCustomers);
+                end
 
                 assert(numAttacks < obj.numCustomers,...
                        "Number of attacks (%d) is larger than or equal to the number of customers (%d)",...
@@ -134,7 +153,7 @@ classdef PowerDistMO
                 u(i) = obj.sys.Vref^2 - obj.v0(t)^2 + oi;
             end
             mSys = obj.sys.C*xSys + u; % + d
-            dxSys = obj.sys.A*xSys + obj.sys.B*obj.Q(mSys,[-14899.4 0 0 14899.4],[2321.6 3464.1 2467.8 2800.0 1900.0]);
+            dxSys = obj.sys.A*xSys + obj.sys.B*obj.Q(mSys,[-14899.4 0 0 14899.4],obj.sys.charInverters);
             dx = dxSys;
         end
 

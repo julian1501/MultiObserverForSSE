@@ -12,7 +12,7 @@ classdef PowerSystem
         Vref % reference voltage
         actImp
         reaImp
-        
+        charInverters
     end
 
     methods
@@ -23,6 +23,7 @@ classdef PowerSystem
             obj.actImp = sysConsts.actImp;
             obj.reaImp = sysConsts.reaImp;
             obj.Vref = 230;
+            obj.charInverters = sysConsts.charInverters;
 
             reaImpMainLine   =   obj.reaImp(:,1);
             reaImpBranches   =   obj.reaImp(:,2);
