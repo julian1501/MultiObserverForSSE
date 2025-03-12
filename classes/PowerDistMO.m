@@ -89,7 +89,7 @@ classdef PowerDistMO
                 for i = 1:obj.numCustomers
                     % Stuff for v_i
                     obari = obj.obar(i);
-                    v(i,ts) = sqrt(obj.sys.C(i,:)*xSys(:,ts) + obj.v0(ts)^2 - obari);
+                    v(i,ts) = sqrt(obj.sys.C(i,:)*xSys(:,ts) + obj.v0(t(ts))^2 - obari);
                 end
             end
             delete(wb);
@@ -168,13 +168,15 @@ classdef PowerDistMO
 
         function obari = obar(obj,i)
             % Implement obar function as in the paper
-            obari = 0;
-            for k = i+1:obj.numCustomers
-                obari = obari + ...
-                       obj.sys.reaImp(i,1)*obj.powerGenCon.reaCon(k) - ...
-                       obj.sys.actImp(i,1)*obj.powerGenCon.actCon(k);
+            reactivePower = 0;
+            activePower   = 0;
+            for k = i:obj.numCustomers
+                reactivePower = reactivePower + obj.powerGenCon.reaCon(k);
+                activePower   = activePower   + obj.powerGenCon.actGen(k) - obj.powerGenCon.actCon(k);
             end
-            obari = 2*(obari - obj.beta(i));
+            reactive = obj.sys.reaImp(i,1)*reactivePower;
+            active   = obj.sys.actImp(i,1)*activePower;
+            obari = 2*reactive - 2*active - 2*obj.beta(i);
 
         end
 
