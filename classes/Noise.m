@@ -16,17 +16,15 @@ classdef Noise
             obj.values = sqrt(var).*randn(numOutputs,steps);
         end
 
-        function interpval = interpNoise(obj,outputs,t)
+        function interpval = value(obj,t)
             % interpval returns the correct subset of outputs at the time t
             % the values will be interpolated from the correct timevalue if
             % t does not match with one that is in the obj.val
-            %
-            % if outputs is set to the string 'all' all outputs are used
-            if strcmp(outputs,"all")
-                outputs = 1:1:size(obj.values,1);
-            end
-            interpFullData = interp1(obj.times',obj.values',t)';
-            interpval = interpFullData(outputs,1);
+            interpval = interp1(obj.times',obj.values',t)';
+        end
+
+        function plot(obj)
+            plot(obj.times,obj.values);
         end
 
     end

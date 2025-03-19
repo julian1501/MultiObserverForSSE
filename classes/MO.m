@@ -12,8 +12,8 @@ classdef MO
         CSet % Output matrix of each observer i
         CSetIndices % Matrix containing the origin of each Ci
         A % Matrix containing (possibly different) A matrices for each observer
-        LSet % Matrix containing the L matrices for each observer
-        KSet % Matrix containing the K matrices for each observer
+        L % Matrix containing the L matrices for each observer
+        K % Matrix containing the K matrices for each observer
         mua
     end
 
@@ -37,7 +37,7 @@ classdef MO
             [obj.CSet,obj.CSetIndices] = obj.CSetSetup();
 
             obj.eigenvalues = -1:-1:-obj.numOutputs;
-            [obj.LSet, obj.KSet] = obj.defineObservers(LMIconsts,true);
+            [obj.L, obj.K] = obj.defineObservers(LMIconsts,true);
 
             
         end
@@ -53,13 +53,13 @@ classdef MO
             end
         end
 
-        function [LSet, KSet] = defineObservers(obj,LMIconsts,diagnosticCheck)
+        function [Li, Ki] = defineObservers(obj,LMIconsts,diagnosticCheck)
             % This function defines the observers based on the LMI as in
             % section 5 of (Chong, 2025, Observer design for nonlinear 
             % systems with asynchronously sampled and maliciously corrupted
             % measurements)
-            LSet = zeros(obj.sys.nx,obj.numOutputsObserver,obj.numObservers);
-            KSet = zeros(obj.sys.nx,obj.numOutputsObserver,obj.numObservers);
+            Li = zeros(obj.sys.nx,obj.numOutputsObserver,obj.numObservers);
+            Ki = zeros(obj.sys.nx,obj.numOutputsObserver,obj.numObservers);
             ebar = 1; % max slope nonlinearity
             ebarM = diag(repmat(ebar^-1,1,obj.numOutputs));
 
@@ -121,8 +121,8 @@ classdef MO
                 
                 L = dec2mat(LMISYS,xfeas,L);
                 K = dec2mat(LMISYS,xfeas,K);
-                LSet(:,:,i) = L;
-                KSet(:,:,i) = K;
+                Li(:,:,i) = L;
+                Ki(:,:,i) = K;
 
                 if diagnosticCheck
                     Rs  = dec2mat(LMISYS,xfeas,Rs);

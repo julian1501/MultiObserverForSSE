@@ -13,14 +13,14 @@ classdef PowerDistMO
         numSubObservers % number of sub observers per primary observer
         subsetIndices % which subobservers are a subobserver of a primary observer
         v0 % substation voltage function
-        mua
+        noise
 
         t % solution time
         x % solution states
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,attack,v0,LMIconsts,inputFileName)
+        function obj = PowerDistMO(numCustomers,attack,noise,v0,LMIconsts,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -29,6 +29,8 @@ classdef PowerDistMO
             
             obj.numCustomers = numCustomers;
             obj.v0 = v0;
+            obj.attack = attack;
+            obj.noise = noise;
 
             if ~isempty(inputFileName)
                 ... % read file extract data
@@ -73,13 +75,12 @@ classdef PowerDistMO
                     sysConsts.charInverters = sysConsts.charInverters(:,1:obj.numCustomers);
                 end
 
-                assert(numAttacks < obj.numCustomers,...
+                assert(obj.attack.numAttacks < obj.numCustomers,...
                        "Number of attacks (%d) is larger than or equal to the number of customers (%d)",...
-                       numAttacks,obj.numCustomers);
+                       obj.attack.numAttacks,obj.numCustomers);
             end
             
             obj.sys = PowerSystem(numCustomers,sysConsts);
-            obj.attack = attack;
 
             numPrimaryObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
             obj.primaryMO = MO(obj.sys,obj.attack,numPrimaryObsvOutputs,LMIconsts);
@@ -189,23 +190,25 @@ classdef PowerDistMO
 
             % calculate system evolution
             mSys = obj.sys.C*xSys + u; % + disturbance
-            ySys = mSys + obj.attack.value(t); % + noise;
+            ySys = mSys + obj.attack.value(t) + obj.noise.value(t);
             dxSys = obj.sys.A*xSys + obj.sys.B*obj.Q(mSys,[-14899.4 0 0 14899.4],obj.sys.charInverters);
             
             % calculate primary observers evolution
             dxPrim = zeros(size(xPrim));
             for o = 1:obj.primaryMO.numObservers
                 xhat = xPrim(:,:,o);
-                mhat = obj.sys.C*xhat + u + obj.primaryMO.KSet(:,:,o)*(obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:)));
-                dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters);
+                dyo = obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:));
+                mhat = obj.sys.C*xhat + u + obj.primaryMO.K(:,:,o)*dyo;
+                dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.primaryMO.L(:,:,o)*dyo;
             end
 
             % calculate secondary observers evolution
             dxSec = zeros(size(xSec));
             for o = 1:obj.secondaryMO.numObservers
                 xhat = xSec(:,:,o);
-                mhat = obj.sys.C*xhat + u + obj.secondaryMO.KSet(:,:,o)*(obj.secondaryMO.CSet(:,:,o)*xhat - ySys(obj.secondaryMO.CSetIndices(o,:)));
-                dxSec(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters);
+                dyo = obj.secondaryMO.CSet(:,:,o)*xhat - ySys(obj.secondaryMO.CSetIndices(o,:));
+                mhat = obj.sys.C*xhat + u + obj.secondaryMO.K(:,:,o)*dyo;
+                dxSec(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.secondaryMO.L(:,:,o)*dyo;
             end
             
             dx = cat(3,dxSys,dxPrim,dxSec);
@@ -235,10 +238,6 @@ classdef PowerDistMO
                 end
             end
         end
-
-%         function v0t = v0(~,t)
-%             v0t = 230 + 5*sin(t);
-%         end
 
         function obari = obar(obj,i)
             % Implement obar function as in the paper
