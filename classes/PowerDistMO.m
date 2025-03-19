@@ -20,7 +20,7 @@ classdef PowerDistMO
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,numAttacks,attackedOutputs,v0,attackFunc,LMIconsts,inputFileName)
+        function obj = PowerDistMO(numCustomers,attack,v0,LMIconsts,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -79,7 +79,7 @@ classdef PowerDistMO
             end
             
             obj.sys = PowerSystem(numCustomers,sysConsts);
-            obj.attack = Attack(obj.numCustomers,numAttacks,attackedOutputs,attackFunc);
+            obj.attack = attack;
 
             numPrimaryObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
             obj.primaryMO = MO(obj.sys,obj.attack,numPrimaryObsvOutputs,LMIconsts);
