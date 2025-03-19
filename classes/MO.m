@@ -14,10 +14,11 @@ classdef MO
         A % Matrix containing (possibly different) A matrices for each observer
         LSet % Matrix containing the L matrices for each observer
         KSet % Matrix containing the K matrices for each observer
+        mua
     end
 
     methods
-        function obj = MO(sys,attack,numOutputsObserver)
+        function obj = MO(sys,attack,numOutputsObserver,LMIconsts)
             %UNTITLED2 Construct an instance of this class
             %   Detailed explanation goes here
             obj.sys = sys;
@@ -36,7 +37,7 @@ classdef MO
             [obj.CSet,obj.CSetIndices] = obj.CSetSetup();
 
             obj.eigenvalues = -1:-1:-obj.numOutputs;
-            [obj.LSet, obj.KSet] = obj.defineObservers(true);
+            [obj.LSet, obj.KSet] = obj.defineObservers(LMIconsts,true);
 
             
         end
@@ -52,7 +53,7 @@ classdef MO
             end
         end
 
-        function [LSet, KSet] = defineObservers(obj,diagnosticCheck)
+        function [LSet, KSet] = defineObservers(obj,LMIconsts,diagnosticCheck)
             % This function defines the observers based on the LMI as in
             % section 5 of (Chong, 2025, Observer design for nonlinear 
             % systems with asynchronously sampled and maliciously corrupted
@@ -78,9 +79,14 @@ classdef MO
 
                 MuaLMI = newlmi; % 0 < Mua
                 lmiterm([-MuaLMI 1 1 Mua],eye(obj.sys.nx),1);
+                lmiterm([MuaLMI 1 1 0],LMIconsts.mua*eye(obj.sys.nx));
 
-                MudLMI = newlmi; % 0 < Mud
-                lmiterm([-MudLMI 1 1 Mud],eye(obj.sys.nx),1);
+                MudLMIlo = newlmi; % 0 < Mud
+                lmiterm([-MudLMIlo 1 1 Mud],eye(obj.sys.nx),1);
+
+                MudLMIhi = newlmi; % Mud < mud
+                lmiterm([MudLMIhi 1 1 Mud],eye(obj.sys.nx),1);
+                lmiterm([-MudLMIhi 1 1 0],LMIconsts.mud*eye(obj.sys.nx));
 
                 DsLMI = newlmi; % 0 < Ds
                 lmiterm([-DsLMI 1 1 Ds],1,1);
@@ -112,21 +118,32 @@ classdef MO
                 [tmin,xfeas] = feasp(LMISYS,[0,0,0,0,1]);
 
                 assert(tmin <= 0,"Observer %d is not observable. tmin = %2.4f\n",i,tmin);
-
-                LSet(:,:,i) = dec2mat(LMISYS,xfeas,L);
-                KSet(:,:,i) = dec2mat(LMISYS,xfeas,K);
+                
+                L = dec2mat(LMISYS,xfeas,L);
+                K = dec2mat(LMISYS,xfeas,K);
+                LSet(:,:,i) = L;
+                KSet(:,:,i) = K;
 
                 if diagnosticCheck
                     Rs  = dec2mat(LMISYS,xfeas,Rs);
                     assert(any(eig(Rs)>0),"Observer %d, Rs eigenvalues not larger than zero",i)
+                    assert(any(Rs == Rs',"all"),"Observer %d, Rs is not symmetric",i)
                     Nu  = dec2mat(LMISYS,xfeas,Nu);
                     assert(Nu>=0,"Observer %d, Nu (%.2f) is not larger than zero",i,Nu)
                     Ds  = dec2mat(LMISYS,xfeas,Ds);
                     assert(any(eig(Ds)>0),"Observer %d, Ds is not positive definite",i)
                     Mua = dec2mat(LMISYS,xfeas,Mua);
-                    assert(Mua>=0,"Observer %d, Mu_a (%.2f) is not larger than zero",i,Mua)
+                    assert(Mua>=LMIconsts.mua,"Observer %d, Mu_a (%.2f) is not larger than the desired size mua (%.2f)",i,Mua,LMIconsts.mua)
                     Mud = dec2mat(LMISYS,xfeas,Mud);
                     assert(Mud>=0,"Observer %d, Mu_d (%2.f) is not larger than zero",i,Mud)
+                    assert(Mud<=LMIconsts.mud,"Observer %d, Mu_d (%2.f) is not smaller than the desired maximum mud (%2.f)",i,Mud,LMIconsts.mud)
+                    
+
+                    OCM = [(Rs*(obj.sys.A + L*Ci) + (obj.sys.A + L*Ci)'*Rs + Nu*eye(obj.sys.nx)) (Rs*obj.sys.B + (obj.sys.C + K*Ci)'*Ds) -Rs Rs;
+                           (Rs*obj.sys.B + (obj.sys.C + K*Ci)'*Ds) -2*Ds*ebarM zeros(obj.sys.nx) zeros(obj.sys.nx);
+                           -Rs zeros(obj.sys.nx) -Mua*eye(obj.sys.nx) zeros(obj.sys.nx);
+                           Rs zeros(obj.sys.nx) zeros(obj.sys.nx) -Mud*eye(obj.sys.nx)];
+                    assert(any(eig(OCM)<0,"all"),"Observer %d does not satisfy the main LMI",i)
                 end
             end
         end

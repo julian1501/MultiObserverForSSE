@@ -13,13 +13,14 @@ classdef PowerDistMO
         numSubObservers % number of sub observers per primary observer
         subsetIndices % which subobservers are a subobserver of a primary observer
         v0 % substation voltage function
+        mua
 
         t % solution time
         x % solution states
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,numAttacks,attackedOutputs,v0,attackFunc,inputFileName)
+        function obj = PowerDistMO(numCustomers,numAttacks,attackedOutputs,v0,attackFunc,LMIconsts,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -81,9 +82,9 @@ classdef PowerDistMO
             obj.attack = Attack(obj.numCustomers,numAttacks,attackedOutputs,attackFunc);
 
             numPrimaryObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
-            obj.primaryMO = MO(obj.sys,obj.attack,numPrimaryObsvOutputs);
+            obj.primaryMO = MO(obj.sys,obj.attack,numPrimaryObsvOutputs,LMIconsts);
             numSecondaryObsvOutputs = 1;
-            obj.secondaryMO = MO(obj.sys,obj.attack,numSecondaryObsvOutputs);
+            obj.secondaryMO = MO(obj.sys,obj.attack,numSecondaryObsvOutputs,LMIconsts);
             obj.numObservers = obj.primaryMO.numObservers + obj.secondaryMO.numObservers;
 
             [obj.numSubObservers,obj.subsetIndices] = obj.findIndices();
