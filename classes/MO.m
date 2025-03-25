@@ -36,7 +36,7 @@ classdef MO
             
             [obj.CSet,obj.CSetIndices] = obj.CSetSetup();
 
-            obj.eigenvalues = -1:-1:-obj.numOutputs;
+            obj.eigenvalues = -1:-1:-obj.numOutputs; %remove
             [obj.L, obj.K] = obj.defineObservers(LMIconsts,true);
 
             

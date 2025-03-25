@@ -20,7 +20,7 @@ classdef PowerDistMO
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,attack,noise,v0,LMIconsts,inputFileName)
+        function obj = PowerDistMO(numCustomers,attack,noise,v0,vref,LMIconsts,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -79,7 +79,7 @@ classdef PowerDistMO
                        "Number of attacks (%d) is larger than or equal to the number of customers (%d)",...
                        obj.attack.numAttacks,obj.numCustomers);
             end
-            
+            sysConsts.vref = vref;
             obj.sys = PowerSystem(numCustomers,sysConsts);
 
             numPrimaryObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
@@ -113,7 +113,7 @@ classdef PowerDistMO
             numOfSubObservers = size(subsetIndices,2);
         end
 
-        function [t,v,err,bestObsv] = solve(obj,tspan,x0sys)
+        function [t,v,x,verr,xerr,bestObsv] = solve(obj,tspan,x0sys)
             %METHOD1 Summary of this method goes here
             %   Detailed explanation goes here
             
@@ -135,6 +135,7 @@ classdef PowerDistMO
             delete(wb);
             wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
             [bestObsv,xBestEst] = obj.selectBestEstimates(obj.t,obj.x,wb);
+            x = cat(3,xSys,xBestEst);
             delete(wb);
             % calculate voltages
             v = zeros(obj.numCustomers,size(obj.t,2),2);
@@ -147,7 +148,8 @@ classdef PowerDistMO
                     v(i,ts,2) = sqrt(obj.sys.C(i,:)*xBestEst(:,ts,1) + v0sqrd - obari);
                 end
             end
-            err = v(:,:,1) - v(:,:,2);
+            verr = v(:,:,1) - v(:,:,2);
+            xerr = x(:,:,1) - x(:,:,2);
         end
         
         function dx = odefun(obj,wb,t,x,tmax)

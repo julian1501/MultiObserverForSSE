@@ -22,7 +22,7 @@ classdef PowerSystem
             obj.B = diag(sysConsts.inverters);
             obj.actImp = sysConsts.actImp;
             obj.reaImp = sysConsts.reaImp;
-            obj.Vref = 230;
+            obj.Vref = sysConsts.vref;
             obj.charInverters = sysConsts.charInverters;
 
             reaImpMainLine   =   obj.reaImp(:,1);
