@@ -113,46 +113,89 @@ classdef PowerDistMO
             numOfSubObservers = size(subsetIndices,2);
         end
 
-        function [t,v,x,verr,xerr,bestObsv] = solve(obj,tspan,x0sys)
+        function [t,v,x,verr,xerr,bestObsv] = solve(obj,varargin) % tspan x0sys
             %METHOD1 Summary of this method goes here
             %   Detailed explanation goes here
             
-            % construct x as [v; x; x_hat_primary; x_hat_secondary]
-            x0 = zeros(obj.sys.nx,1,1+obj.numObservers);
-            x0(:,:,1) = x0sys;
-            x0 = x0(:);
-
-            wb = waitbar(0,'Solver is currently at time: 0','Name','Solving the ODE');
-            [obj.t,obj.x] = ode45(@(t,x) obj.odefun(wb,t,x,tspan(2)),tspan,x0);
-            % some reshape black magic to get it in the correct form (all
-            % observers behind each other)
-            obj.x = reshape(obj.x,[],obj.sys.nx,obj.numObservers+1); 
-            obj.x = permute(obj.x,[2 1 3]);
-            obj.t = obj.t';
-            t = obj.t;
-            xSys  = obj.x(:,:,1);
-            % select best estimate
-            delete(wb);
-            wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
-            [bestObsv,xBestEst] = obj.selectBestEstimates(obj.t,obj.x,wb);
-            x = cat(3,xSys,xBestEst);
-            delete(wb);
-            % calculate voltages
-            v = zeros(obj.numCustomers,size(obj.t,2),2);
-            for ts = 1:1:size(obj.t,2)
-                v0sqrd = obj.v0(obj.t(ts))^2;
-                for i = 1:obj.numCustomers
-                    % Stuff for v_i
-                    obari = obj.obar(i);
-                    v(i,ts,1) = sqrt(obj.sys.C(i,:)*xSys(:,ts,1) + v0sqrd - obari);
-                    v(i,ts,2) = sqrt(obj.sys.C(i,:)*xBestEst(:,ts,1) + v0sqrd - obari);
+            tspan = [0 10];
+            x0sys = zeros(1, obj.numCustomers);
+            solveObservers = true;
+            % extract values from varargin
+            for i = 1:2:size(varargin,2)
+                switch lower(varargin{i})
+                    case 'tspan'
+                        tspan = varargin{i+1};
+                    case 'x0sys'
+                        x0sys = varargin{i+1};
+                    case 'solveobservers'
+                        solveObservers = varargin{i+1};
                 end
             end
-            verr = v(:,:,1) - v(:,:,2);
-            xerr = x(:,:,1) - x(:,:,2);
+            
+            wb = waitbar(0,'Solver is currently at time: 0','Name','Solving the ODE');
+            switch solveObservers
+                case true
+                    % construct x as [v; x; x_hat_primary; x_hat_secondary]
+                    x0 = zeros(obj.sys.nx,1,1+obj.numObservers);
+                    x0(:,:,1) = x0sys;
+                    x0 = x0(:);
+
+                    [obj.t,obj.x] = ode45(@(t,x) obj.odefunMO(wb,t,x,tspan(2)),tspan,x0);
+                    % some reshape black magic to get it in the correct form (all
+                    % observers behind each other)
+                    obj.x = reshape(obj.x,[],obj.sys.nx,obj.numObservers+1); 
+                    obj.x = permute(obj.x,[2 1 3]);
+                    obj.t = obj.t';
+                    t = obj.t;
+                    xSys  = obj.x(:,:,1);
+
+                    % select best estimate
+                    delete(wb);
+                    wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
+                    [bestObsv,xBestEst] = obj.selectBestEstimates(obj.t,obj.x,wb);
+                    x = cat(3,xSys,xBestEst);
+                    delete(wb);
+
+                    numVoltageConversions = 2;
+
+                case false
+                    [obj.t,obj.x] = ode45(@(t,x) obj.odefunSys(wb,t,x,tspan(2)),tspan,x0sys);
+                    % some reshape black magic to get it in the correct form (all
+                    % observers behind each other)
+                    obj.x = obj.x';
+                    obj.t = obj.t';
+                    x = obj.x;
+                    t = obj.t;
+                    numVoltageConversions = 1;
+                    bestObsv = [];
+                    delete(wb);
+            end
+            
+            % calculate voltages
+
+            v = zeros(obj.numCustomers,size(obj.t,2),numVoltageConversions);
+            for k = 1:1:numVoltageConversions
+                for ts = 1:1:size(obj.t,2)
+                    v0sqrd = obj.v0(obj.t(ts))^2;
+                    for i = 1:obj.numCustomers
+                        % Stuff for v_i
+                        obari = obj.obar(i);
+                        v(i,ts,k) = obj.sys.C(i,:)*x(:,ts,1) + v0sqrd - obari;
+                    end
+                end
+            end
+            
+            switch solveObservers
+                case 1
+                    verr = v(:,:,1) - v(:,:,2);
+                    xerr = x(:,:,1) - x(:,:,2);
+                case 0
+                    verr = [];
+                    xerr = [];
+            end
         end
         
-        function dx = odefun(obj,wb,t,x,tmax)
+        function dx = odefunMO(obj,wb,t,x,tmax)
             % Update waitbar
             try
                 waitbar(t/tmax,wb,sprintf('Solver is currently at time: %.4f',t))
@@ -187,7 +230,7 @@ classdef PowerDistMO
                 
                     oi = oi + obarj + 2*betaj;
                 end
-                u(i) = obj.sys.Vref^2 - obj.v0(t)^2 + oi;
+                u(i) = obj.sys.Vref(t)^2 - obj.v0(t)^2 + oi;
             end
 
             % calculate system evolution
@@ -215,6 +258,44 @@ classdef PowerDistMO
             
             dx = cat(3,dxSys,dxPrim,dxSec);
             dx = dx(:);
+        end
+
+        function dx = odefunSys(obj,wb,t,x,tmax)
+            % Update waitbar
+            try
+                waitbar(t/tmax,wb,sprintf('Solver is currently at time: %.4f',t))
+            catch ME
+                switch ME.identifier
+                    case 'MATLAB:waitbar:InvalidSecondInput'
+                        error('User terminated the solver.')
+                    otherwise
+                        rethrow(ME)
+                end
+        
+            end
+
+            % calculate u
+            u = zeros(obj.numCustomers,1);
+            for i = 1:obj.numCustomers
+                oi = 0;
+
+                % Stuff for u_i
+                for j = 1:i
+                    obarj = obj.obar(j);
+                    if ~(j < i)
+                        oi = oi + obarj;
+                        continue;
+                    end
+                    betaj = obj.beta(j);
+                
+                    oi = oi + obarj + 2*betaj;
+                end
+                u(i) = obj.sys.Vref(t)^2 - obj.v0(t)^2 + oi;
+            end
+
+            % calculate system evolution
+            m  = obj.sys.C*x + u; % + disturbance
+            dx = obj.sys.A*x + obj.sys.B*obj.Q(m,[-14899.4 0 0 14899.4],obj.sys.charInverters);
         end
 
         function Q_m = Q(obj,m,wLims,refCon)
