@@ -180,7 +180,7 @@ classdef PowerDistMO
                     for i = 1:obj.numCustomers
                         % Stuff for v_i
                         obari = obj.obar(i);
-                        v(i,ts,k) = obj.sys.C(i,:)*x(:,ts,1) + v0sqrd - obari;
+                        v(i,ts,k) = obj.sys.C(i,:)*x(:,ts,k) + v0sqrd - obari;
                     end
                 end
             end
