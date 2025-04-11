@@ -20,7 +20,7 @@ classdef PowerDistMO
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,attack,noise,v0,vref,LMIconsts,inputFileName)
+        function obj = PowerDistMO(numCustomers,primObsvOutputs,attack,noise,v0,vref,LMIconsts,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -81,9 +81,11 @@ classdef PowerDistMO
             end
             sysConsts.vref = vref;
             obj.sys = PowerSystem(numCustomers,sysConsts);
-
-            numPrimaryObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
-            obj.primaryMO = MO(obj.sys,obj.attack,numPrimaryObsvOutputs,LMIconsts);
+            
+            if primObsvOutputs == 0
+                primObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
+            end
+            obj.primaryMO = MO(obj.sys,obj.attack,primObsvOutputs,LMIconsts);
             numSecondaryObsvOutputs = 1;
             obj.secondaryMO = MO(obj.sys,obj.attack,numSecondaryObsvOutputs,LMIconsts);
             obj.numObservers = obj.primaryMO.numObservers + obj.secondaryMO.numObservers;
@@ -242,7 +244,7 @@ classdef PowerDistMO
             dxPrim = zeros(size(xPrim));
             for o = 1:obj.primaryMO.numObservers
                 xhat = xPrim(:,:,o);
-                dyo = obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:));
+                dyo  = obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.primaryMO.K(:,:,o)*dyo;
                 dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.primaryMO.L(:,:,o)*dyo;
             end
@@ -251,7 +253,7 @@ classdef PowerDistMO
             dxSec = zeros(size(xSec));
             for o = 1:obj.secondaryMO.numObservers
                 xhat = xSec(:,:,o);
-                dyo = obj.secondaryMO.CSet(:,:,o)*xhat - ySys(obj.secondaryMO.CSetIndices(o,:));
+                dyo  = obj.secondaryMO.CSet(:,:,o)*xhat - ySys(obj.secondaryMO.CSetIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.secondaryMO.K(:,:,o)*dyo;
                 dxSec(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.secondaryMO.L(:,:,o)*dyo;
             end
