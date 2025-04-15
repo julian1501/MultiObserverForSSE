@@ -20,7 +20,7 @@ classdef PowerDistMO
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,primObsvOutputs,attack,noise,v0,vref,LMIconsts,inputFileName)
+        function obj = PowerDistMO(numCustomers,obsvSize,attack,noise,v0,vref,LMIconsts,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -82,12 +82,24 @@ classdef PowerDistMO
             sysConsts.vref = vref;
             obj.sys = PowerSystem(numCustomers,sysConsts);
             
-            if primObsvOutputs == 0
+
+            if obsvSize(1) == 0
                 primObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
+            else
+                primObsvOutputs = obsvSize(1);
             end
+            if obsvSize(2) == 0
+                if attack.numAttacks*2 < obj.numCustomers
+                    secObsvOutputs = obj.numCustomers - 2*obj.attack.numAttacks;
+                else
+                    secObsvOutputs  = 1;
+                end
+            else
+                secObsvOutputs = obsvSize(2);
+            end
+            
             obj.primaryMO = MO(obj.sys,obj.attack,primObsvOutputs,LMIconsts);
-            numSecondaryObsvOutputs = 1;
-            obj.secondaryMO = MO(obj.sys,obj.attack,numSecondaryObsvOutputs,LMIconsts);
+            obj.secondaryMO = MO(obj.sys,obj.attack,secObsvOutputs,LMIconsts);
             obj.numObservers = obj.primaryMO.numObservers + obj.secondaryMO.numObservers;
 
             [obj.numSubObservers,obj.subsetIndices] = obj.findIndices();
@@ -244,7 +256,7 @@ classdef PowerDistMO
             dxPrim = zeros(size(xPrim));
             for o = 1:obj.primaryMO.numObservers
                 xhat = xPrim(:,:,o);
-                dyo  = obj.primaryMO.CSet(:,:,o)*xhat - ySys(obj.primaryMO.CSetIndices(o,:));
+                dyo  = obj.primaryMO.CSet(:,:,o)*xhat + u(obj.primaryMO.CSetIndices(o,:)) - ySys(obj.primaryMO.CSetIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.primaryMO.K(:,:,o)*dyo;
                 dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.primaryMO.L(:,:,o)*dyo;
             end
@@ -253,7 +265,7 @@ classdef PowerDistMO
             dxSec = zeros(size(xSec));
             for o = 1:obj.secondaryMO.numObservers
                 xhat = xSec(:,:,o);
-                dyo  = obj.secondaryMO.CSet(:,:,o)*xhat - ySys(obj.secondaryMO.CSetIndices(o,:));
+                dyo  = obj.secondaryMO.CSet(:,:,o)*xhat + u(obj.secondaryMO.CSetIndices(o,:)) - ySys(obj.secondaryMO.CSetIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.secondaryMO.K(:,:,o)*dyo;
                 dxSec(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.secondaryMO.L(:,:,o)*dyo;
             end
@@ -371,7 +383,8 @@ classdef PowerDistMO
                             rethrow(ME)
                     end
                 end
-
+                
+                PiJ = zeros(obj.primaryMO.numObservers,1);
                 for primObsv = 1:obj.primaryMO.numObservers
                     xPrim_ti = xPrim(:,t,primObsv);
                     difflist = zeros(obj.numSubObservers,1);
