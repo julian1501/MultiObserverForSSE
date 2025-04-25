@@ -14,13 +14,15 @@ classdef PowerDistMO
         subsetIndices % which subobservers are a subobserver of a primary observer
         v0 % substation voltage function
         noise
+        predictors % boolean indicating whether predictors are active or not
+        interSampleTimes % sample intervals between sensor updates
 
         t % solution time
         x % solution states
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,obsvSize,attack,noise,v0,vref,LMIconsts,inputFileName)
+        function obj = PowerDistMO(numCustomers,obsvSize,attack,noise,predictors,v0,vref,LMIconsts,inputFileName)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
@@ -31,6 +33,7 @@ classdef PowerDistMO
             obj.v0 = v0;
             obj.attack = attack;
             obj.noise = noise;
+            obj.predictors = predictors;
 
             if ~isempty(inputFileName)
                 ... % read file extract data
@@ -103,6 +106,8 @@ classdef PowerDistMO
             obj.numObservers = obj.primaryMO.numObservers + obj.secondaryMO.numObservers;
 
             [obj.numSubObservers,obj.subsetIndices] = obj.findIndices();
+
+            obj.interSampleTimes = obj.initPredictors(5);
 
         end
 
@@ -248,9 +253,36 @@ classdef PowerDistMO
             end
 
             % calculate system evolution
-            mSys = obj.sys.C*xSys + u; % + disturbance
-            ySys = mSys + obj.attack.value(t) + obj.noise.value(t);
+            mSys = obj.sys.C*xSys + u;
             dxSys = obj.sys.A*xSys + obj.sys.B*obj.Q(mSys,[-14899.4 0 0 14899.4],obj.sys.charInverters);
+            ySys = mSys + obj.attack.value(t) + obj.noise.value(t);
+
+            switch obj.predictors
+                case 0 % no predictors
+
+                case 1 % predictors
+                    [~,xhat] = obj.selectBestEstimates(1,x,0);
+                    % update predictors
+                    dyhat = zeros(obj.numCustomers);
+                    mSysPred = obj.sys.C*xhat + u;
+                    for i = 1:1:obj.numCustomers
+                        % check if update time is reached
+                        updateCondition = mod(t - obj.interSampleTimes(i,2),obj.interSampleTimes(i,1));
+                        if updateCondition > 0
+                            % update (flow)
+                            Bphi = obj.sys.B*obj.Q(mSysPred,[-14899.4 0 0 14899.4],obj.sys.charInverters);
+                            yhat(i) = obj.sys.C(i,:)*(obj.sys.A*xhat + Bphi) + obj.P*(yhat)
+                        elseif updateCondition == 0
+                            % update (jump)
+                            yhat(i) = ySys(i);
+                        else
+                            error("The predictor update condition failed.")
+                        end
+                    end
+%                     % update state
+%                     Bphi = obj.sys.B*obj.Q(mSysPred,[-14899.4 0 0 14899.4],obj.sys.charInverters) ;
+%                     ySys = obj.sys.C*(obj.sys.A*xhat + Bphi) + obj.P*(yhat - obj.sys.C*xhat);
+            end
             
             % calculate primary observers evolution
             dxPrim = zeros(size(xPrim));
@@ -360,46 +392,59 @@ classdef PowerDistMO
             end
         end
 
-        function [bestEstObsv,bestStateEstimate] = selectBestEstimates(obj,t,x,wb)
+        function [bestEstObsv,bestStateEstimate] = selectBestEstimates(obj,tsteps,x,wb)
             xPrim = x(:,:,2:obj.primaryMO.numObservers+1);
             xSec  = x(:,:,obj.primaryMO.numObservers+2:end);
             % PiJ stores all the maximum difference between a primary and
-            % all its secondary observers
-            PiJ = zeros(obj.primaryMO.numObservers,1);
-            
-            tsteps = size(t,2);
+            % all its secondary observers            
             bestStateEstimate = zeros(obj.sys.nx,tsteps);
             bestEstObsv = zeros(1,tsteps);
 
-            for t=1:tsteps
+            for ts=1:tsteps
                 % update waitbar
-                try
-                    waitbar(t/tsteps,wb,sprintf('Selector is currently at timestep: %d/%d',t,tsteps))
-                catch ME
-                    switch ME.identifier
-                        case 'MATLAB:waitbar:InvalidSecondInput'
-                            error('User terminated the solver.')
-                        otherwise
-                            rethrow(ME)
+                if wb ~= 0
+                    try
+                        waitbar(ts/tsteps,wb,sprintf('Selector is currently at timestep: %d/%d',ts,tsteps))
+                    catch ME
+                        switch ME.identifier
+                            case 'MATLAB:waitbar:InvalidSecondInput'
+                                error('User terminated the solver.')
+                            otherwise
+                                rethrow(ME)
+                        end
                     end
                 end
                 
                 PiJ = zeros(obj.primaryMO.numObservers,1);
                 for primObsv = 1:obj.primaryMO.numObservers
-                    xPrim_ti = xPrim(:,t,primObsv);
+                    xPrim_ti = xPrim(:,ts,primObsv);
                     difflist = zeros(obj.numSubObservers,1);
                     for subObsv = 1:obj.numSubObservers
                         subObsvID = obj.subsetIndices(primObsv,subObsv);
-                        xSub_ti = xSec(:,t,subObsvID);
+                        xSub_ti = xSec(:,ts,subObsvID);
                         difflist(subObsv) = norm(xPrim_ti-xSub_ti);
                     end
                     PiJ(primObsv) = max(difflist);
                 end
                 bestObsv = find(PiJ==min(PiJ));
                 bestObsv = bestObsv(1);
-                bestEstObsv(t) = bestObsv;
-                bestStateEstimate(:,t) = xPrim(:,t,bestObsv);
+                bestEstObsv(ts) = bestObsv;
+                bestStateEstimate(:,ts) = xPrim(:,ts,bestObsv);
             end
+        end
+
+        function interSampleTimes = initPredictors(obj,maxTinterval)
+            
+            % column 1: inter sample time
+            % column 2: start offset (< inter sample time)
+            interSampleTimes = zeros(obj.numCustomers,2); 
+            for c = 1:1:obj.numCustomers
+                interSampleTimes(c,1) = rand(1)*maxTinterval;
+                interSampleTimes(c,2) = rand(1)*interSampleTimes(c,1);
+            end
+            % normalize times such that the first update is at t=0
+            minStartTime = min(interSampleTimes(:,2));
+            interSampleTimes(:,2) = interSampleTimes(:,2) - minStartTime;
         end
     end
 end
