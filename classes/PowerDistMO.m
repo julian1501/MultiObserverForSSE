@@ -152,43 +152,29 @@ classdef PowerDistMO
             end
             
             wb = waitbar(0,'Solver is currently at time: 0','Name','Solving the ODE');
-            switch solveObservers
-                case true
-                    % construct x as [v; x; x_hat_primary; x_hat_secondary]
-                    x0 = zeros(obj.sys.nx,1,1+obj.numObservers);
-                    x0(:,:,1) = x0sys;
-                    x0 = x0(:);
 
-                    [obj.t,obj.x] = ode45(@(t,x) obj.odefunMO(wb,t,x,tspan(2)),tspan,x0);
-                    % some reshape black magic to get it in the correct form (all
-                    % observers behind each other)
-                    obj.x = reshape(obj.x,[],obj.sys.nx,obj.numObservers+1); 
-                    obj.x = permute(obj.x,[2 1 3]);
-                    obj.t = obj.t';
-                    t = obj.t;
-                    xSys  = obj.x(:,:,1);
+            % construct x as [v; x; x_hat_primary; x_hat_secondary]
+            x0 = zeros(obj.sys.nx,1,1+obj.numObservers);
+            x0(:,:,1) = x0sys;
+            x0 = x0(:);
 
-                    % select best estimate
-                    delete(wb);
-                    wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
-                    [bestObsv,xBestEst] = obj.selectBestEstimates(obj.t,obj.x,wb);
-                    x = cat(3,xSys,xBestEst);
-                    delete(wb);
+            [obj.t,obj.x] = ode45(@(t,x) obj.odefunMO(wb,t,x,tspan(2)),tspan,x0);
+            % some reshape black magic to get it in the correct form (all
+            % observers behind each other)
+            obj.x = reshape(obj.x,[],obj.sys.nx,obj.numObservers+1); 
+            obj.x = permute(obj.x,[2 1 3]);
+            obj.t = obj.t';
+            t = obj.t;
+            xSys  = obj.x(:,:,1);
 
-                    numVoltageConversions = 2;
+            % select best estimate
+            delete(wb);
+            wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
+            [bestObsv,xBestEst] = obj.selectBestEstimates(obj.t,obj.x,wb);
+            x = cat(3,xSys,xBestEst);
+            delete(wb);
 
-                case false
-                    [obj.t,obj.x] = ode45(@(t,x) obj.odefunSys(wb,t,x,tspan(2)),tspan,x0sys);
-                    % some reshape black magic to get it in the correct form (all
-                    % observers behind each other)
-                    obj.x = obj.x';
-                    obj.t = obj.t';
-                    x = obj.x;
-                    t = obj.t;
-                    numVoltageConversions = 1;
-                    bestObsv = [];
-                    delete(wb);
-            end
+            numVoltageConversions = 2;
             
             % calculate voltages
 
@@ -225,7 +211,6 @@ classdef PowerDistMO
                     otherwise
                         rethrow(ME)
                 end
-        
             end
             % Extract different x sets
             x = reshape(x,obj.sys.nx,1,[]);
@@ -271,7 +256,7 @@ classdef PowerDistMO
                         if updateCondition > 0
                             % update (flow)
                             Bphi = obj.sys.B*obj.Q(mSysPred,[-14899.4 0 0 14899.4],obj.sys.charInverters);
-                            yhat(i) = obj.sys.C(i,:)*(obj.sys.A*xhat + Bphi) + obj.P*(yhat)
+                            yhat(i) = obj.sys.C(i,:)*(obj.sys.A*xhat + Bphi) + obj.P*(yhat);
                         elseif updateCondition == 0
                             % update (jump)
                             yhat(i) = ySys(i);
@@ -279,9 +264,7 @@ classdef PowerDistMO
                             error("The predictor update condition failed.")
                         end
                     end
-%                     % update state
-%                     Bphi = obj.sys.B*obj.Q(mSysPred,[-14899.4 0 0 14899.4],obj.sys.charInverters) ;
-%                     ySys = obj.sys.C*(obj.sys.A*xhat + Bphi) + obj.P*(yhat - obj.sys.C*xhat);
+
             end
             
             % calculate primary observers evolution
@@ -392,11 +375,12 @@ classdef PowerDistMO
             end
         end
 
-        function [bestEstObsv,bestStateEstimate] = selectBestEstimates(obj,tsteps,x,wb)
+        function [bestEstObsv,bestStateEstimate] = selectBestEstimates(obj,t,x,wb)
             xPrim = x(:,:,2:obj.primaryMO.numObservers+1);
             xSec  = x(:,:,obj.primaryMO.numObservers+2:end);
             % PiJ stores all the maximum difference between a primary and
-            % all its secondary observers            
+            % all its secondary observers
+            tsteps = max(size(t));
             bestStateEstimate = zeros(obj.sys.nx,tsteps);
             bestEstObsv = zeros(1,tsteps);
 
