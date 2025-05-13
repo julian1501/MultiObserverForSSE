@@ -133,7 +133,7 @@ classdef PowerDistMO
             numOfSubObservers = size(subsetIndices,2);
         end
 
-        function [t,vout,xout,verr,xerr,y,yhat,timers,bestObsv] = solve(obj,varargin) % tspan x0sys
+        function outputs = solve(obj,varargin) % tspan x0sys
             %METHOD1 Summary of this method goes here
             %   Detailed explanation goes here
             
@@ -173,11 +173,11 @@ classdef PowerDistMO
             ODE = ode(ODEFcn=odeFun,InitialValue=x0(:),EventDefinition=E,Solver="ode45");
             ODE.Parameters = {wb, tspan(2), obj};
             sol = solve(ODE,tspan(1),tspan(2));
-            t = sol.Time;
+            outputs.t = sol.Time;
             xs = sol.Solution;
 
             % get the observers behind each other
-            x = zeros(obj.numCustomers,size(t,2),obj.numObservers + 3);
+            x = zeros(obj.numCustomers,size(outputs.t,2),obj.numObservers + 3);
             for i = 1:1:obj.numObservers + 3
                 rows = (i-1)*obj.numCustomers + (1:obj.numCustomers);
                 x(:,:,i) = xs(rows,:);
@@ -185,45 +185,45 @@ classdef PowerDistMO
             % x = permute(x,[2 1 3]);
             % t = t';             
             
-            timers = x(:,:,1);
+            outputs.timers = x(:,:,1);
             % recover y from x
-            yhat = x(:,:,3);
-            y = zeros(size(x(:,:,2)));
-            for ts = 1:1:size(t,2)
-                y(:,ts) = obj.sys.C*x(:,ts,2) + obj.u(t(ts)) + ...
-                    obj.attack.value(t(ts)) + obj.noise.value(t(ts));
+            outputs.yhat = x(:,:,3);
+            outputs.y = zeros(size(x(:,:,2)));
+            for ts = 1:1:size(outputs.t,2)
+                outputs.y(:,ts) = obj.sys.C*x(:,ts,2) + obj.u(outputs.t(ts)) + ...
+                    obj.attack.value(outputs.t(ts)) + obj.noise.value(outputs.t(ts));
             end
            
             % select best estimate
             delete(wb);
             wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
-            [bestObsv,xBestEst] = obj.selectBestEstimates(t,x,wb);
-            xout = cat(3,x(:,:,2),xBestEst);
+            [outputs.bestObsv,outputs.xBestEst] = obj.selectBestEstimates(outputs.t,x,wb);
+            outputs.xout = cat(3,x(:,:,2),outputs.xBestEst);
             delete(wb);
 
             numVoltageConversions = 2;
             
             % calculate voltages
 
-            vout = zeros(obj.numCustomers,size(t,2),numVoltageConversions);
+            outputs.vout = zeros(obj.numCustomers,size(outputs.t,2),numVoltageConversions);
             for k = 1:1:numVoltageConversions
-                for ts = 1:1:size(t,2)
-                    v0sqrd = obj.v0(t(ts))^2;
+                for ts = 1:1:size(outputs.t,2)
+                    v0sqrd = obj.v0(outputs.t(ts))^2;
                     for i = 1:obj.numCustomers
                         % Stuff for v_i
                         obari = obj.obar(i);
-                        vout(i,ts,k) = obj.sys.C(i,:)*xout(:,ts,k) + v0sqrd - obari;
+                        outputs.vout(i,ts,k) = obj.sys.C(i,:)*outputs.xout(:,ts,k) + v0sqrd - obari;
                     end
                 end
             end
             
             switch solveObservers
                 case 1
-                    verr = vout(:,:,1) - vout(:,:,2);
-                    xerr = xout(:,:,1) - xout(:,:,2);
+                    outputs.verr = outputs.vout(:,:,1) - outputs.vout(:,:,2);
+                    outputs.xerr = outputs.xout(:,:,1) - outputs.xout(:,:,2);
                 case 0
-                    verr = [];
-                    xerr = [];
+                    outputs.verr = [];
+                    outputs.xerr = [];
             end
         end
         
