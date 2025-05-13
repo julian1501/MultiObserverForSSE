@@ -129,7 +129,7 @@ classdef PowerDistMO
             numOfSubObservers = size(subsetIndices,2);
         end
 
-        function [t,vout,xout,verr,xerr,bestObsv] = solve(obj,varargin) % tspan x0sys
+        function [t,vout,xout,verr,xerr,y,yhat,timers,bestObsv] = solve(obj,varargin) % tspan x0sys
             %METHOD1 Summary of this method goes here
             %   Detailed explanation goes here
             
@@ -151,45 +151,50 @@ classdef PowerDistMO
             wb = waitbar(0,'Solver is currently at time: 0','Name','Solving the ODE');
             
             if obj.predictors == 1
-                options = odeset('Events',@obj.predictorUpdate);
+                E = odeEvent('EventFcn',@obj.predictorUpdateCheck, ...
+                             'Direction',"descending", ...
+                             'Response',"callback", ...
+                             'CallbackFcn',@updateWrapper);
             else
-                options = odeset();
+                E = [];
             end
 
             % construct x as [v; x; x_hat_primary; x_hat_secondary]
-            x0 = zeros(obj.sys.nx,1,2+obj.numObservers);
-            x0(:,:,1) = x0sys;
-            maxtsim = tspan(1);
-            xsim = x0(:);
-            x = []; t = [];
-            i = 0;
+            x0 = zeros(obj.sys.nx,1,3+obj.numObservers);
+            x0(:,:,1) = obj.interSampleTimes(:,2);
+            x0(:,:,2) = x0sys;
 
-            while maxtsim < tspan(2)
-                i = i + 1;
-                % update sensor that needs updating
-                xsimLastT = xsim(:,end,:);
-                x0 = xsimLastT(:);
-                x0 = reshape(x0,obj.sys.nx,1,[]);
-                xSys  = x0(:,:,1);
-                yhat  = x0(:,:,2);
+            % setup ode
+            odeFun = @(t,x,p) obj.odefunMO(t,x,p);
+            ODE = ode(ODEFcn=odeFun,InitialValue=x0(:),EventDefinition=E,Solver="ode45");
+            ODE.Parameters = {wb, tspan(2), obj};
+            sol = solve(ODE,tspan(1),tspan(2));
+            t = sol.Time;
+            xs = sol.Solution;
 
-                [tsim,xsim] = ode45(@(t,x) obj.odefunMO(wb,i,t,x,tspan(2)),[maxtsim tspan(2)],x0,options);
-                % some reshape black magic to get it in the correct form (all
-                % observers behind each other)
-                xsim = reshape(xsim,[],obj.sys.nx,obj.numObservers+2); 
-                xsim = permute(xsim,[2 1 3]);
-                tsim = tsim';
-
-                x = cat(2,x,xsim);
-                t = cat(2,t,tsim);
-                maxtsim = tsim(end);              
+            % get the observers behind each other
+            x = zeros(obj.numCustomers,size(t,2),obj.numObservers + 3);
+            for i = 1:1:obj.numObservers + 3
+                rows = (i-1)*obj.numCustomers + (1:obj.numCustomers);
+                x(:,:,i) = xs(rows,:);
+            end
+            % x = permute(x,[2 1 3]);
+            % t = t';             
+            
+            timers = x(:,:,1);
+            % recover y from x
+            yhat = x(:,:,3);
+            y = zeros(size(x(:,:,2)));
+            for ts = 1:1:size(t,2)
+                y(:,ts) = obj.sys.C*x(:,ts,2) + obj.u(t(ts)) + ...
+                    obj.attack.value(t(ts)) + obj.noise.value(t(ts));
             end
            
             % select best estimate
             delete(wb);
             wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
             [bestObsv,xBestEst] = obj.selectBestEstimates(t,x,wb);
-            xout = cat(3,x(:,:,1),xBestEst);
+            xout = cat(3,x(:,:,2),xBestEst);
             delete(wb);
 
             numVoltageConversions = 2;
@@ -218,10 +223,14 @@ classdef PowerDistMO
             end
         end
         
-        function dx = odefunMO(obj,wb,i,t,x,tmax)
+        function dx = odefunMO(obj,t,x,p)
+            wb = p{1,1};
+            tmax = p{1,2};
+            obj = p{1,3};
+
             % Update waitbar
             try
-                waitbar(t/tmax,wb,sprintf('Solver is currently at time: %.4f, on predictor update: %d',t,i))
+                waitbar(t/tmax,wb,sprintf('Solver is currently at time: %.4f',t))
             catch ME
                 switch ME.identifier
                     case 'MATLAB:waitbar:InvalidSecondInput'
@@ -232,29 +241,16 @@ classdef PowerDistMO
             end
             % Extract different x sets
             x = reshape(x,obj.sys.nx,1,[]);
-            xSys  = x(:,:,1);
-            yhat  = x(:,:,2);
-            xPrim = x(:,:,3:obj.primaryMO.numObservers+2);
-            xSec  = x(:,:,obj.primaryMO.numObservers+3:end);
+            timer = x(:,:,1);
+            xSys  = x(:,:,2);
+            yhat  = x(:,:,3);
+            xPrim = x(:,:,4:obj.primaryMO.numObservers+3);
+            xSec  = x(:,:,obj.primaryMO.numObservers+4:end);
             
-            % calculate u
-            u = zeros(obj.numCustomers,1);
-            for i = 1:obj.numCustomers
-                oi = 0;
+            u = obj.u(t);
 
-                % Stuff for u_i
-                for j = 1:i
-                    obarj = obj.obar(j);
-                    if ~(j < i)
-                        oi = oi + obarj;
-                        continue;
-                    end
-                    betaj = obj.beta(j);
-                
-                    oi = oi + obarj + 2*betaj;
-                end
-                u(i) = obj.sys.Vref(t)^2 - obj.v0(t)^2 + oi;
-            end
+            % set timer derivatives
+            dtimer = -1.*ones(size(timer));
 
             % calculate system evolution
             mSys = obj.sys.C*xSys + u;
@@ -272,7 +268,7 @@ classdef PowerDistMO
             dxPrim = zeros(size(xPrim));
             for o = 1:obj.primaryMO.numObservers
                 xhat = xPrim(:,:,o);
-                dyo  = obj.primaryMO.CSet(:,:,o)*xhat + u(obj.primaryMO.CSetIndices(o,:)) - ySys(obj.primaryMO.CSetIndices(o,:));
+                dyo  = obj.primaryMO.CSet(:,:,o)*xhat + u(obj.primaryMO.CSetIndices(o,:)) - yhat(obj.primaryMO.CSetIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.primaryMO.K(:,:,o)*dyo;
                 dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.primaryMO.L(:,:,o)*dyo;
             end
@@ -281,12 +277,12 @@ classdef PowerDistMO
             dxSec = zeros(size(xSec));
             for o = 1:obj.secondaryMO.numObservers
                 xhat = xSec(:,:,o);
-                dyo  = obj.secondaryMO.CSet(:,:,o)*xhat + u(obj.secondaryMO.CSetIndices(o,:)) - ySys(obj.secondaryMO.CSetIndices(o,:));
+                dyo  = obj.secondaryMO.CSet(:,:,o)*xhat + u(obj.secondaryMO.CSetIndices(o,:)) - yhat(obj.secondaryMO.CSetIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.secondaryMO.K(:,:,o)*dyo;
                 dxSec(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.secondaryMO.L(:,:,o)*dyo;
             end
             
-            dx = cat(3,dxSys,dyhat,dxPrim,dxSec);
+            dx = cat(3,dtimer,dxSys,dyhat,dxPrim,dxSec);
             dx = dx(:);
         end
 
@@ -305,37 +301,45 @@ classdef PowerDistMO
             end
 
             % calculate u
-            u = zeros(obj.numCustomers,1);
-            for i = 1:obj.numCustomers
-                oi = 0;
-
-                % Stuff for u_i
-                for j = 1:i
-                    obarj = obj.obar(j);
-                    if ~(j < i)
-                        oi = oi + obarj;
-                        continue;
-                    end
-                    betaj = obj.beta(j);
-                
-                    oi = oi + obarj + 2*betaj;
-                end
-                u(i) = obj.sys.Vref(t)^2 - obj.v0(t)^2 + oi;
-            end
+            u = obj.u(t);
 
             % calculate system evolution
             m  = obj.sys.C*x + u; % + disturbance
             dx = obj.sys.A*x + obj.sys.B*obj.Q(m,[-14899.4 0 0 14899.4],obj.sys.charInverters);
         end
 
-        function [minTimeToUpdate,isterminal,direction] = predictorUpdate(obj,t,x)
-            timeToUpdate = zeros(obj.numCustomers,1);
-            for i = 1:1:obj.numCustomers
-                timeToUpdate(i) = obj.interSampleTimes(i,2) - rem(t - obj.interSampleTimes(i,2),obj.interSampleTimes(i,1));
+        function minTimer = predictorUpdateCheck(obj,t,x)
+            x = reshape(x,obj.sys.nx,1,[]);
+            timers = x(:,:,1);            
+            minTimer = min(timers);
+            sensorToUpdate = find(timers==minTimer);
+            
+            if minTimer < 0
+                fprintf("Sensor %d requires update at %2.2f [s]\n",sensorToUpdate,t)
             end
-            minTimeToUpdate = min(timeToUpdate);
-            isterminal = 1; % halt the simulation
-            direction = -1; % approach from positive values
+        end
+
+        function [stop, xupdated] = predictorUpdate(obj,t,x,i,parameters)
+            stop = false; % do not stop the simulation
+
+            x = reshape(x,obj.sys.nx,1,[]);
+            timers = x(:,:,1);
+            xSys   = x(:,:,2);
+            yhat   = x(:,:,3);
+            y = obj.sys.C*xSys + obj.u(t) + obj.attack.value(t) + obj.noise.value(t);
+
+            minTimer = min(timers);
+            sensorToUpdate = find(timers==minTimer);
+
+            yhat(sensorToUpdate) = y(sensorToUpdate);
+            timers(sensorToUpdate) = obj.interSampleTimes(sensorToUpdate,1);
+            
+            xupdated = x;
+            xupdated(:,:,1) = timers;
+            xupdated(:,:,3) = yhat;
+            xupdated = xupdated(:);
+
+            fprintf("Sensor %d updated at %2.2f\n",sensorToUpdate,t)
         end
 
         function Q_m = Q(obj,m,wLims,refCon)
@@ -383,6 +387,27 @@ classdef PowerDistMO
             elseif i > 0
                 betai = obj.sys.actImp(i,2)*(obj.powerGenCon.actGen(i) - obj.powerGenCon.actCon(i)) + ...
                         obj.sys.reaImp(i,2)*obj.powerGenCon.reaCon(i);
+            end
+        end
+
+        function u = u(obj,t)
+            % calculate u
+            u = zeros(obj.numCustomers,1);
+            for i = 1:obj.numCustomers
+                oi = 0;
+
+                % Stuff for u_i
+                for j = 1:i
+                    obarj = obj.obar(j);
+                    if ~(j < i)
+                        oi = oi + obarj;
+                        continue;
+                    end
+                    betaj = obj.beta(j);
+                
+                    oi = oi + obarj + 2*betaj;
+                end
+                u(i) = obj.sys.Vref(t)^2 - obj.v0(t)^2 + oi;
             end
         end
 
@@ -443,4 +468,9 @@ classdef PowerDistMO
             interSampleTimes(:,2) = interSampleTimes(:,2) - minStartTime + 0.01; 
         end
     end
+end
+
+function [stop, xupdated] = updateWrapper(t,x,i,p)
+    obj = p{1,3};
+    [stop, xupdated] = obj.predictorUpdate(t,x,[],p);
 end
