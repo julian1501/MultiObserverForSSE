@@ -13,32 +13,34 @@ classdef PowerDistMO
         numSubObservers % number of sub observers per primary observer
         subsetIndices % which subobservers are a subobserver of a primary observer
         v0 % substation voltage function
+        vref % reference voltage
         noise
         predictors % boolean indicating whether predictors are active or not
         interSampleTimes % sample intervals between sensor updates
     end
 
     methods
-        function obj = PowerDistMO(numCustomers,obsvSize,attack,noise,predictors,v0,vref,LMIconsts,inputFileName)
+        function obj = PowerDistMO(inputs,attack,noise)
             % PowerDistMO Construct an instance of this class
             %   Detailed explanation goes here
 
             fprintf(repmat('-',1,100));
-            fprintf('\nCreating a system with %d customers\n',numCustomers);
+            fprintf('\nCreating a system with %d customers\n',obj.numCustomers);
             
-            obj.numCustomers = numCustomers;
-            obj.v0 = v0;
+            obj.numCustomers = inputs.numCustomers;
+            obj.v0 = inputs.sys.v0;
             obj.attack = attack;
             obj.noise = noise;
-            obj.predictors = predictors;
+            obj.predictors = inputs.predictors;
 
-            if ~isempty(inputFileName)
+            if ~isempty(inputs.inputFileName)
                 ... % read file extract data
                 % Implement when data format is known
+                error('File input not yet supported')
             else
                 % in case of no file provided use 'standard system'
                 sysConsts = struct();
-                sysConsts.inverters = ones(numCustomers,1);
+                sysConsts.inverters = ones(obj.numCustomers,1);
                 sysConsts.actImp = [0.00343, 0.04711; 
                                     0.00172, 0.02356; 
                                     0.00343, 0.04711; 
@@ -79,9 +81,11 @@ classdef PowerDistMO
                        "Number of attacks (%d) is larger than or equal to the number of customers (%d)",...
                        obj.attack.numAttacks,obj.numCustomers);
             end
-            sysConsts.vref = vref;
-            obj.sys = PowerSystem(numCustomers,sysConsts);
-            
+
+            obj.vref = inputs.sys.vref;
+            sysConsts.vref = inputs.sys.vref;
+            obj.sys = PowerSystem(obj.numCustomers,sysConsts);
+            obsvSize = inputs.obsv.size;
 
             if obsvSize(1) == 0
                 primObsvOutputs = obj.numCustomers - obj.attack.numAttacks;
@@ -98,8 +102,8 @@ classdef PowerDistMO
                 secObsvOutputs = obsvSize(2);
             end
             
-            obj.primaryMO = MO(obj.sys,obj.attack,primObsvOutputs,LMIconsts);
-            obj.secondaryMO = MO(obj.sys,obj.attack,secObsvOutputs,LMIconsts);
+            obj.primaryMO = MO(obj.sys,obj.attack,primObsvOutputs,inputs.LMIconsts);
+            obj.secondaryMO = MO(obj.sys,obj.attack,secObsvOutputs,inputs.LMIconsts);
             obj.numObservers = obj.primaryMO.numObservers + obj.secondaryMO.numObservers;
 
             [obj.numSubObservers,obj.subsetIndices] = obj.findIndices();
@@ -150,7 +154,7 @@ classdef PowerDistMO
             
             wb = waitbar(0,'Solver is currently at time: 0','Name','Solving the ODE');
             
-            if obj.predictors == 1
+            if obj.predictors.enabled == 1
                 E = odeEvent('EventFcn',@obj.predictorUpdateCheck, ...
                              'Direction',"descending", ...
                              'Response',"callback", ...
@@ -261,7 +265,7 @@ classdef PowerDistMO
             [~,xhat] = obj.selectBestEstimates(1,x,0);
             mSysPred = obj.sys.C*xhat + u;
             Bphi = obj.sys.B*obj.Q(mSysPred,[-14899.4 0 0 14899.4],obj.sys.charInverters);
-            dyhat = obj.sys.C*(obj.sys.A*xhat + Bphi) - eye(obj.numCustomers)*(yhat - obj.sys.C*xhat);
+            dyhat = obj.sys.C*(obj.sys.A*xhat + Bphi) - obj.predictors.gain*eye(obj.numCustomers)*(yhat - obj.sys.C*xhat);
 
             
             % calculate primary observers evolution

@@ -10,18 +10,20 @@ classdef Attack
     end
 
     methods
-        function obj = Attack(numOutputs,numAttacks,attackedOutputs,attackFunc)
+        function obj = Attack(inputs)
             % Attack Construct an instance of this class
             %   Detailed explanation goes here
-            obj.attackFunc = attackFunc;
-            obj.numAttacks = numAttacks;
-            if ~ (numOutputs > 2* numAttacks)
+            numOutputs = inputs.numCustomers;
+            obj.attackFunc = inputs.attack.func;
+            obj.numAttacks = inputs.attack.num;
+            if ~ (numOutputs > 2* obj.numAttacks)
                warning('The number of outputs is not larger then twice the number of attacked outputs %3.0f <= %3.0f',numOutputs,numAttacks); 
             end
 
             % pick random outputs to attack if none have been specified
-            if isempty(attackedOutputs)
-                obj.attackedOutputs = sort(randperm(numOutputs,numAttacks));
+            obj.attackedOutputs = inputs.attack.attackedOutputs;
+            if isempty(obj.attackedOutputs)
+                obj.attackedOutputs = sort(randperm(numOutputs,obj.numAttacks));
             end
             fprintf("The attacked outputs are: \n");
             disp(obj.attackedOutputs);

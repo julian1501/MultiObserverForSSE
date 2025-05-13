@@ -6,9 +6,14 @@ classdef Noise
     end
 
     methods
-        function obj = Noise(numOutputs,tspan,var,sampleFreq)
+        function obj = Noise(inputs)
             % define number of timesamples for noise
-            steps = (tspan(2) - tspan(1))*sampleFreq;
+            numOutputs = inputs.numCustomers;
+            tspan = inputs.tspan;
+            var = inputs.noiseVar;
+            sampleFreq = inputs.sampleFreq;
+
+            steps = (inputs.tspan(2) - tspan(1))*sampleFreq;
             stepsize = tspan(2)/steps;
             obj.times = tspan(1):stepsize:tspan(2);
             steps = size(obj.times,2);
