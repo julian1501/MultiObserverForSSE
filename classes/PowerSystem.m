@@ -39,24 +39,6 @@ classdef PowerSystem
             obj.nx = size(obj.A,1);
             obj.ny = size(obj.C,1);
             obj.nu = size(obj.B,2);
-
-            if obj.isStable == 0
-                fprintf("The system is not stable. \n")
-            else
-                fprintf("The system is stable. \n")
-            end
-            
-            if obj.isObsv == 0
-                error("The system (A,C) is not observable. \n")
-            else
-                fprintf("The system (A,C) is observable. \n")
-            end
-
-            if obj.isCtrb == 0
-                error("The system (A,B) is not controlable. \n")
-            else
-                fprintf("The system (A,C) is controlable. \n")
-            end
         end
 
         function stableBool = isStable(obj)

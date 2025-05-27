@@ -32,6 +32,12 @@ classdef PowerDistMO
             obj.attack = attack;
             obj.noise = noise;
             obj.predictors = inputs.predictors;
+            
+            % check if the gain is larger then one, change if not
+            if obj.predictors.gain <= 1
+                warning("Predictor gain needs to be larger then 1, it will be set to 1.1")
+                obj.predictors.gain = 1.1;
+            end
 
             if ~isempty(inputs.inputFileName)
                 ... % read file extract data
@@ -108,7 +114,7 @@ classdef PowerDistMO
 
             [obj.numSubObservers,obj.subsetIndices] = obj.findIndices();
 
-            obj.interSampleTimes = obj.initPredictors(5);
+            obj.interSampleTimes = obj.initPredictors();
 
         end
 
@@ -116,12 +122,12 @@ classdef PowerDistMO
             % Find which secondary observers are a sub observer of all
             % primary observers.
             for j = 1:1:obj.primaryMO.numObservers
-                CPrimIndices = obj.primaryMO.CSetIndices(j,:);
+                CPrimIndices = obj.primaryMO.CIndices(j,:);
                 % create new emtpy row to fill and append to the bottom of
                 % PsubsetOfJIndices
                 newRow = [];
                 for p = 1:1:obj.secondaryMO.numObservers
-                    CSecIndices = obj.secondaryMO.CSetIndices(p,:);
+                    CSecIndices = obj.secondaryMO.CIndices(p,:);
                     isPSubset = all(ismember(CSecIndices,CPrimIndices));
                     % If the indices of p are a subset of those of j: find the
                     if isPSubset
@@ -163,7 +169,7 @@ classdef PowerDistMO
                 E = [];
             end
 
-            % construct x as [v; x; x_hat_primary; x_hat_secondary]
+            % construct x as [timers; x; yhat; x_hat_primary; x_hat_secondary]
             x0 = zeros(obj.sys.nx,1,3+obj.numObservers);
             x0(:,:,1) = obj.interSampleTimes(:,2);
             x0(:,:,2) = x0sys;
@@ -172,6 +178,8 @@ classdef PowerDistMO
             odeFun = @(t,x,p) obj.odefunMO(t,x,p);
             ODE = ode(ODEFcn=odeFun,InitialValue=x0(:),EventDefinition=E,Solver="ode45");
             ODE.Parameters = {wb, tspan(2), obj};
+
+            % solve the ode
             sol = solve(ODE,tspan(1),tspan(2));
             outputs.t = sol.Time;
             xs = sol.Solution;
@@ -182,10 +190,9 @@ classdef PowerDistMO
                 rows = (i-1)*obj.numCustomers + (1:obj.numCustomers);
                 x(:,:,i) = xs(rows,:);
             end
-            % x = permute(x,[2 1 3]);
-            % t = t';             
             
             outputs.timers = x(:,:,1);
+            outputs.state  = x(:,:,2);
             % recover y from x
             outputs.yhat = x(:,:,3);
             outputs.y = zeros(size(x(:,:,2)));
@@ -198,29 +205,24 @@ classdef PowerDistMO
             delete(wb);
             wb = waitbar(0,'Selection is currently at time: 0','Name','Selecting best estimates MO');
             [outputs.bestObsv,outputs.xBestEst] = obj.selectBestEstimates(outputs.t,x,wb);
-            outputs.xout = cat(3,x(:,:,2),outputs.xBestEst);
             delete(wb);
 
-            numVoltageConversions = 2;
-            
             % calculate voltages
-
-            outputs.vout = zeros(obj.numCustomers,size(outputs.t,2),numVoltageConversions);
-            for k = 1:1:numVoltageConversions
+            outputs.v    = zeros(obj.numCustomers,size(outputs.t,2));
+            outputs.vest = zeros(obj.numCustomers,size(outputs.t,2));
+            for i = 1:1:obj.numCustomers
                 for ts = 1:1:size(outputs.t,2)
                     v0sqrd = obj.v0(outputs.t(ts))^2;
-                    for i = 1:obj.numCustomers
-                        % Stuff for v_i
-                        obari = obj.obar(i);
-                        outputs.vout(i,ts,k) = obj.sys.C(i,:)*outputs.xout(:,ts,k) + v0sqrd - obari;
-                    end
+                    obari = obj.obar(i);
+                    outputs.v(i,ts)    = obj.sys.C(i,:)*outputs.state(:,ts) + v0sqrd - obari;
+                    outputs.vest(i,ts) = obj.sys.C(i,:)*outputs.xBestEst(:,ts) + v0sqrd - obari;
                 end
             end
             
             switch solveObservers
                 case 1
-                    outputs.verr = outputs.vout(:,:,1) - outputs.vout(:,:,2);
-                    outputs.xerr = outputs.xout(:,:,1) - outputs.xout(:,:,2);
+                    outputs.verr = outputs.v - outputs.vest;
+                    outputs.xerr = outputs.state - outputs.xBestEst;
                 case 0
                     outputs.verr = [];
                     outputs.xerr = [];
@@ -265,14 +267,20 @@ classdef PowerDistMO
             [~,xhat] = obj.selectBestEstimates(1,x,0);
             mSysPred = obj.sys.C*xhat + u;
             Bphi = obj.sys.B*obj.Q(mSysPred,[-14899.4 0 0 14899.4],obj.sys.charInverters);
-            dyhat = obj.sys.C*(obj.sys.A*xhat + Bphi) - obj.predictors.gain*eye(obj.numCustomers)*(yhat - obj.sys.C*xhat);
-
+            dyhat = obj.sys.C*(obj.sys.A*xhat + Bphi) - obj.predictors.gain*eye(obj.numCustomers)*(yhat - mSysPred);
+            
+            % select the correct y
+            if obj.predictors.enabled
+                y = yhat;
+            else
+                y = ySys;
+            end
             
             % calculate primary observers evolution
             dxPrim = zeros(size(xPrim));
             for o = 1:obj.primaryMO.numObservers
                 xhat = xPrim(:,:,o);
-                dyo  = obj.primaryMO.CSet(:,:,o)*xhat + u(obj.primaryMO.CSetIndices(o,:)) - yhat(obj.primaryMO.CSetIndices(o,:));
+                dyo  = obj.primaryMO.C(:,:,o)*xhat + u(obj.primaryMO.CIndices(o,:)) - y(obj.primaryMO.CIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.primaryMO.K(:,:,o)*dyo;
                 dxPrim(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.primaryMO.L(:,:,o)*dyo;
             end
@@ -281,7 +289,7 @@ classdef PowerDistMO
             dxSec = zeros(size(xSec));
             for o = 1:obj.secondaryMO.numObservers
                 xhat = xSec(:,:,o);
-                dyo  = obj.secondaryMO.CSet(:,:,o)*xhat + u(obj.secondaryMO.CSetIndices(o,:)) - yhat(obj.secondaryMO.CSetIndices(o,:));
+                dyo  = obj.secondaryMO.C(:,:,o)*xhat + u(obj.secondaryMO.CIndices(o,:)) - y(obj.secondaryMO.CIndices(o,:));
                 mhat = obj.sys.C*xhat + u + obj.secondaryMO.K(:,:,o)*dyo;
                 dxSec(:,:,o) = obj.sys.A*xhat + obj.sys.B*obj.Q(mhat,[-14899.4 0 0 14899.4],obj.sys.charInverters) + obj.secondaryMO.L(:,:,o)*dyo;
             end
@@ -416,8 +424,8 @@ classdef PowerDistMO
         end
 
         function [bestEstObsv,bestStateEstimate] = selectBestEstimates(obj,t,x,wb)
-            xPrim = x(:,:,3:obj.primaryMO.numObservers+2);
-            xSec  = x(:,:,obj.primaryMO.numObservers+3:end);
+            xPrim = x(:,:,4:obj.primaryMO.numObservers+3);
+            xSec  = x(:,:,obj.primaryMO.numObservers+4:end);
             % PiJ stores all the maximum difference between a primary and
             % all its secondary observers
             tsteps = max(size(t));
@@ -457,11 +465,54 @@ classdef PowerDistMO
             end
         end
 
-        function interSampleTimes = initPredictors(obj,maxTinterval)
+        function interSampleTimes = initPredictors(obj)
             
             % column 1: inter sample time
             % column 2: start offset (< inter sample time)
-            interSampleTimes = zeros(obj.numCustomers,2); 
+            interSampleTimes = zeros(obj.numCustomers,2);
+
+            % find max inter sample time
+            aiPrimMax = max(obj.primaryMO.ai);
+            aiSecMax  = max(obj.secondaryMO.ai);
+            aiMax     = max(aiPrimMax, aiSecMax);
+            biPrimMax = max(obj.primaryMO.bi);
+            biSecMax  = max(obj.secondaryMO.bi);
+            biMax     = max(biPrimMax, biSecMax);
+            ciPrimMax = max(obj.primaryMO.ci);
+            ciSecMax  = max(obj.secondaryMO.ci);
+            ciMax     = max(ciPrimMax, ciSecMax);
+            
+            ebari = 1;
+
+            l = zeros(1,obj.numObservers);
+            lf = norm(obj.sys.A) + norm(obj.sys.B)*norm(obj.sys.C);
+            for i = 1:1:obj.primaryMO.numObservers
+                l(i) = 1/(2*aiMax)*norm(obj.primaryMO.C(:,:,i))^(2)*(lf^2 + obj.predictors.gain);
+            end
+            for i = 1:1:obj.secondaryMO.numObservers
+                l(i+obj.primaryMO.numObservers) = 1/(2*aiMax)*norm(obj.secondaryMO.C(:,:,i))^(2)*(lf^2 + obj.predictors.gain);
+            end
+            sumli = sum(l);
+            assert(biMax > 2*sumli,"bv is not larger than twice the sum of l, condition as in the paper")
+
+            q = obj.predictors.gain - 1;
+            minq = min(q); % obsolete until gains are different
+            
+            % assert(ciMax/2 < minq,"An epsillon such that (cv + epsillon)/2 < minq does not exist.")
+            % find minimum epsillon as in equation 20 in Chong paper
+            eps = 0;
+            step = 10e10;
+            for i = 1:1:20
+                while (ciMax + eps + step)/2 < minq
+                    eps = eps + step;
+                end
+                step = 0.1*step;
+            end
+            eps = 2;
+            maxTinterval = (1/eps)*log(biMax/(2*sumli)); % strictly smaller because epsillon is slightly bigger
+            assert(maxTinterval>0,'Max predictor update interval is negative: %.3f',maxTinterval)
+            fprintf("The max time interval is: %.3f [s]\n",maxTinterval)
+
             for c = 1:1:obj.numCustomers
                 interSampleTimes(c,1) = rand(1)*maxTinterval;
                 interSampleTimes(c,2) = rand(1)*interSampleTimes(c,1);
@@ -474,7 +525,7 @@ classdef PowerDistMO
     end
 end
 
-function [stop, xupdated] = updateWrapper(t,x,i,p)
+function [stop, xupdated] = updateWrapper(t,x,~,p)
     obj = p{1,3};
     [stop, xupdated] = obj.predictorUpdate(t,x,[],p);
 end
