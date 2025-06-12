@@ -8,7 +8,6 @@ classdef MO
         numOutputs % the number of sensors sensing the system
         numObservers % number of observers in this multi observer
         numOutputsObserver % number of outputs that each observer has
-        eigenvalues % eigenvalues of the observer
         C % Output matrix of each observer i
         CIndices % Matrix containing the origin of each Ci
         A % Matrix containing (possibly different) A matrices for each observer
@@ -39,7 +38,6 @@ classdef MO
             
             [obj.C,obj.CIndices] = obj.CSetup();
 
-            obj.eigenvalues = -1:-1:-obj.numOutputs; %remove
             [obj.L, obj.K, obj.ai, obj.bi, obj.ci] = obj.defineObservers(LMIconsts);
 
             
@@ -124,18 +122,18 @@ classdef MO
                 LKLMI = newlmi; % Whole big thing
                 lmiterm([LKLMI 1 1 Rsh],1,obj.A,'s');
                 lmiterm([LKLMI 1 1 Lh],Rsh,Ci,'s');
-                lmiterm([LKLMI 1 1 Nuh],1,1);
+                lmiterm([LKLMI 1 1 Nuh],eye(obj.sys.nx),1);
 
-                lmiterm([LKLMI 1 2 Rsh],obj.sys.B,1);
-                lmiterm([LKLMI 1 2 -Dsh],obj.sys.C',1);
-                lmiterm([LKLMI 1 2 -Kh],Ci',Dsh');
+                lmiterm([LKLMI 1 2 Rsh],1,obj.sys.B);
+                lmiterm([LKLMI 1 2 Dsh],obj.sys.C',1);
+                lmiterm([LKLMI 1 2 -Kh],Ci',Dsh); % use the previously defined Kht
 
                 lmiterm([LKLMI 1 3 Rsh],-1,1);
                 lmiterm([LKLMI 1 4 Rsh],1,1);
 
                 lmiterm([LKLMI 2 2 Dsh],-2,ebarM);
-                lmiterm([LKLMI 3 3 Muah],-1,1);
-                lmiterm([LKLMI 4 4 Mudh],-1,1);
+                lmiterm([LKLMI 3 3 Muah],-1,eye(obj.sys.nx));
+                lmiterm([LKLMI 4 4 Mudh],-1,eye(obj.sys.nx));
                 
                 % construct lmi and solve
                 LMISYS = getlmis;
@@ -179,7 +177,7 @@ classdef MO
                 
 
                 OCM = [(RsVal*(obj.sys.A + LVal*Ci) + (obj.sys.A + LVal*Ci)'*RsVal + NuVal*eye(obj.sys.nx)) (RsVal*obj.sys.B + (obj.sys.C + Kval*Ci)'*DsVal) -RsVal RsVal;
-                       (RsVal*obj.sys.B + (obj.sys.C + Kval*Ci)'*DsVal) -2*DsVal*ebarM zeros(obj.sys.nx) zeros(obj.sys.nx);
+                       (RsVal*obj.sys.B + (obj.sys.C + Kval*Ci)'*DsVal)' -2*DsVal*ebarM zeros(obj.sys.nx) zeros(obj.sys.nx);
                        -RsVal zeros(obj.sys.nx) -MuaVal*eye(obj.sys.nx) zeros(obj.sys.nx);
                        RsVal zeros(obj.sys.nx) zeros(obj.sys.nx) -MudVal*eye(obj.sys.nx)];
                 assert(any(eig(OCM)<0,"all"),"Observer %d does not satisfy the main LMI",i)
