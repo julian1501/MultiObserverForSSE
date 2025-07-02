@@ -143,7 +143,7 @@ classdef MO
                 numDecVars = decnbr(LMISYS);
                 c = zeros(1, numDecVars);
                 c(NuInfo(1):NuInfo(end)) = -10;  % Maximize Nu
-                c(MuaInfo(1):MuaInfo(end)) = 1; % Minimize Mua
+                c(MuaInfo(1):MuaInfo(end)) = 3; % Minimize Mua
 
                 Rs_info = decinfo(LMISYS, Rsh);
                 c(Rs_info(1):Rs_info(end)) = 0.1; %  minimize the trace of Rs
@@ -163,12 +163,12 @@ classdef MO
                 Ki(:,:,i) = Kval;
 
                 RsVal  = dec2mat(LMISYS,fopt,Rsh);
-                assert(any(eig(RsVal)>0),"Observer %d, Rs eigenvalues not larger than zero",i)
-                assert(any(RsVal == RsVal',"all"),"Observer %d, Rs is not symmetric",i)
+                assert(all(eig(RsVal)>0),"Observer %d, Rs eigenvalues not larger than zero",i)
+                assert(all(RsVal == RsVal',"all"),"Observer %d, Rs is not symmetric",i)
                 NuVal  = dec2mat(LMISYS,fopt,Nuh);
                 assert(NuVal>=LMIconsts.nu,"Observer %d, Nu (%.2f) is not larger than the desired size nu (%.2f)",i,NuVal,LMIconsts.nu)
                 DsVal  = dec2mat(LMISYS,fopt,Dsh);
-                assert(any(eig(DsVal)>0),"Observer %d, Ds is not positive definite",i)
+                assert(all(eig(DsVal)>0),"Observer %d, Ds is not positive definite",i)
                 MuaVal = dec2mat(LMISYS,fopt,Muah);
                 assert(MuaVal>=LMIconsts.mua,"Observer %d, Mu_a (%.2f) is not larger than the desired size mua (%.2f)",i,MuaVal,LMIconsts.mua)
                 MudVal = dec2mat(LMISYS,fopt,Mudh);
@@ -180,13 +180,15 @@ classdef MO
                        (RsVal*obj.sys.B + (obj.sys.C + Kval*Ci)'*DsVal)' -2*DsVal*ebarM zeros(obj.sys.nx) zeros(obj.sys.nx);
                        -RsVal zeros(obj.sys.nx) -MuaVal*eye(obj.sys.nx) zeros(obj.sys.nx);
                        RsVal zeros(obj.sys.nx) zeros(obj.sys.nx) -MudVal*eye(obj.sys.nx)];
-                assert(any(eig(OCM)<0,"all"),"Observer %d does not satisfy the main LMI",i)
+                assert(all(eig(OCM)<0,"all"),"Observer %d does not satisfy the main LMI",i)
                 
                 eigRs = eig(RsVal);
                 lambdaMinRs = min(eigRs);
                 ai(i) = lambdaMinRs;
                 bi(i) = NuVal/lambdaMinRs;
                 ci(i) = MuaVal*(norm(LVal)^2 + norm(obj.sys.B)^2*ebar^2);
+
+                
 
             end
         end
